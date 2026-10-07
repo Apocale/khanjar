@@ -40,6 +40,14 @@ final class OnboardingWindowController: NSObject {
         try? Data().write(to: marker)
     }
 
+    /// Documentation : le contenu de la fenêtre, rendu hors écran (render-media).
+    func snapshotPNG(dark: Bool) -> Data? {
+        if window == nil { window = buildWindow() }
+        refresh()
+        guard let view = window?.contentView else { return nil }
+        return Snapshot.png(of: view, dark: dark, backdrop: dark ? NSColor(calibratedWhite: 0.17, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1))
+    }
+
     func open() {
         if window == nil { window = buildWindow() }
         refresh()

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>How Khanjar works</title>
+  <desc>Press Command J in Premiere Pro, the Khanjar app on your Mac shows the palette, and its plugin inside Premiere applies the chosen effect to the selected clips, over a local connection that refuses web pages.</desc>
+  <rect width="960" height="300" rx="16" fill="#0d1117"/>
+  <rect x="24" y="24" width="912" height="252" rx="14" fill="none" stroke="#30363d" stroke-dasharray="6 6"/>
+  <text x="44" y="54" font-size="14" fill="#8b949e">Your Mac — your clips and presets stay here</text>
+  <g>
+    <rect x="44" y="84" width="250" height="150" rx="12" fill="#161b22" stroke="#30363d"/>
+    <text x="64" y="118" font-size="17" font-weight="600" fill="#e6edf3">Khanjar app</text>
+    <text x="64" y="144" font-size="14" fill="#8b949e">Menu bar, ⌘J shortcut</text>
+    <text x="64" y="166" font-size="14" fill="#8b949e">Search and your presets</text>
+    <text x="64" y="188" font-size="14" fill="#8b949e">Most used items first</text>
+  </g>
+  <g>
+    <rect x="355" y="128" width="250" height="62" rx="31" fill="#1f6feb"/>
+    <text x="480" y="155" font-size="15" font-weight="600" fill="#ffffff" text-anchor="middle">Local connection</text>
+    <text x="480" y="175" font-size="12.5" fill="#ffffff" text-anchor="middle" opacity="0.9">web pages are refused</text>
+    <path d="M298 159 H350" stroke="#1f6feb" stroke-width="3" marker-end="url(#a)"/>
+    <path d="M610 159 H662" stroke="#1f6feb" stroke-width="3" marker-end="url(#a)"/>
+  </g>
+  <g>
+    <rect x="666" y="84" width="250" height="150" rx="12" fill="#161b22" stroke="#30363d"/>
+    <text x="686" y="118" font-size="17" font-weight="600" fill="#e6edf3">Plugin in Premiere</text>
+    <text x="686" y="144" font-size="14" fill="#8b949e">Installed automatically</text>
+    <text x="686" y="166" font-size="14" fill="#8b949e">Applies to selected clips</text>
+    <text x="686" y="188" font-size="14" fill="#8b949e">One ⌘Z to undo</text>
+  </g>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1f6feb"/></marker></defs>
+</svg>

@@ -8,6 +8,12 @@ selected clip, in a single undo step.
 
 > **Beta.** Free and open source. Not affiliated with or endorsed by Adobe.
 
+<p align="center">
+  <img src="docs/media/demo.gif" width="720" alt="Press ⌘J, type “gauss”, press Enter: Gaussian Blur is applied to the selected clips">
+</p>
+
+<p align="center"><a href="https://github.com/Apocale/khanjar/releases/latest"><b>Download the latest version</b></a> · <a href="docs/INSTALL.md">Install in 3 minutes</a> · <a href="docs/INSTALL.fr.md">En français</a></p>
+
 ## What it does
 
 - **One search box for everything**: all video effects, your own presets and Adobe's presets.
@@ -23,6 +29,37 @@ selected clip, in a single undo step.
 - **Adjustment layer at the playhead**: **⌘⇧J** drops an adjustment layer above your clips.
 - **Automatic updates**, signed so that only genuine Khanjar releases can install.
 - English and French interface.
+
+## A closer look
+
+**The palette opens on what you use most.** ⌘1 to ⌘0 apply an item without typing.
+A *duo* (two presets you always chain) is one keystroke.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/palette-frequent-dark.png">
+  <img src="docs/media/palette-frequent-light.png" width="720" alt="Khanjar palette listing the most used presets with ⌘1 to ⌘8 shortcuts">
+</picture>
+
+**Fuzzy search across effects and presets.** Type a word, or just the initials.
+
+<table>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/palette-search-dark.png"><img src="docs/media/palette-search-light.png" alt="Searching “blur” lists blur effects and presets"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/media/palette-initials-dark.png"><img src="docs/media/palette-initials-light.png" alt="Typing “tds” finds True Drop Shadow"></picture></td>
+  </tr>
+  <tr><td align="center"><code>blur</code></td><td align="center"><code>tds</code> → True Drop Shadow</td></tr>
+</table>
+
+**A key for any preset, and a welcome screen that explains the rest.**
+
+<table>
+  <tr>
+    <td><img src="docs/media/settings-dark.png" alt="Settings: palette and adjustment layer shortcuts, preset shortcuts"></td>
+    <td><img src="docs/media/welcome-dark.png" alt="Welcome screen explaining where Khanjar lives and how to use it"></td>
+  </tr>
+</table>
+
+<sub>These screens are drawn by Khanjar itself (<code>khanjar render-media</code>) with example presets.</sub>
 
 ## Requirements
 
@@ -63,6 +100,11 @@ the crash happened — never your clips, presets, projects, file paths or anythi
 Details: [PRIVACY.md](PRIVACY.md).
 
 ## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/how-it-works-dark.svg">
+  <img src="docs/media/how-it-works-light.svg" width="860" alt="The Khanjar app and its plugin inside Premiere talk over a local connection on your Mac">
+</picture>
 
 Two processes and a small protocol:
 

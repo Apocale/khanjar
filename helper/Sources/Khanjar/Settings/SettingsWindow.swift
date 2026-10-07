@@ -44,6 +44,14 @@ final class SettingsWindowController: NSObject {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
+    /// Documentation : le contenu de la fenêtre, rendu hors écran (render-media).
+    func snapshotPNG(dark: Bool) -> Data? {
+        if window == nil { window = buildWindow() }
+        reload()
+        guard let view = window?.contentView else { return nil }
+        return Snapshot.png(of: view, dark: dark, backdrop: dark ? NSColor(calibratedWhite: 0.17, alpha: 1) : NSColor(calibratedWhite: 0.93, alpha: 1))
+    }
+
     func open() {
         if window == nil { window = buildWindow() }
         reload()
@@ -135,14 +143,21 @@ final class SettingsWindowController: NSObject {
             [label(L("Adjustment layer shortcut:")), adjustmentRecorder],
             [label(L("Number of results:")), resultsPopup],
             [label(L("Theme:")), themePopup],
-            [NSGridCell.emptyContentView, adaptCheckbox],
+            [adaptCheckbox, NSGridCell.emptyContentView],
         ])
         // Proposée seulement si ce build sait où envoyer (sinon promesse vide).
-        if CrashReporter.isAvailable { grid.addRow(with: [NSGridCell.emptyContentView, crashCheckbox]) }
+        if CrashReporter.isAvailable { grid.addRow(with: [crashCheckbox, NSGridCell.emptyContentView]) }
         crashCheckbox.toolTip = L("Only if Khanjar crashes: the versions and where in the code. Never your clips, presets or files.")
         grid.rowSpacing = 10
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).width = 180
+        // Les cases tiennent sur toute la largeur : dans la colonne de droite (180 pt),
+        // « Adapt presets to the clip's framing » était coupé (vu sur le rendu du README).
+        for checkbox in [adaptCheckbox, crashCheckbox] {
+            guard let cell = grid.cell(for: checkbox), let row = cell.row else { continue }
+            row.mergeCells(in: NSRange(location: 0, length: 2))
+            cell.xPlacement = .center
+        }
 
         let saveButton = NSButton(title: L("Save"), target: self, action: #selector(save))
         saveButton.keyEquivalent = "\r"
@@ -164,7 +179,21 @@ final class SettingsWindowController: NSObject {
         shortcutsStack.alignment = .leading
         shortcutsStack.spacing = 6
         let scScroll = NSScrollView()
-        scScroll.documentView = shortcutsStack
+        // Document « retourné » (origine en haut) : la liste commence en haut du
+        // cadre. La contrainte seule ne suffisait pas — le rendu du README (2026-10-07)
+        // montrait la liste collée en BAS quand elle ne remplit pas la hauteur.
+        let listDocument = FlippedView()
+        listDocument.translatesAutoresizingMaskIntoConstraints = false
+        listDocument.addSubview(shortcutsStack)
+        scScroll.documentView = listDocument
+        NSLayoutConstraint.activate([
+            listDocument.topAnchor.constraint(equalTo: scScroll.contentView.topAnchor),
+            listDocument.leadingAnchor.constraint(equalTo: scScroll.contentView.leadingAnchor),
+            listDocument.widthAnchor.constraint(equalTo: scScroll.contentView.widthAnchor),
+            listDocument.bottomAnchor.constraint(equalTo: shortcutsStack.bottomAnchor, constant: 4),
+            shortcutsStack.topAnchor.constraint(equalTo: listDocument.topAnchor, constant: 4),
+            shortcutsStack.leadingAnchor.constraint(equalTo: listDocument.leadingAnchor, constant: 4),
+        ])
         scScroll.hasVerticalScroller = true
         scScroll.borderType = .bezelBorder
         scScroll.drawsBackground = false
@@ -172,10 +201,7 @@ final class SettingsWindowController: NSObject {
         scScroll.heightAnchor.constraint(equalToConstant: 130).isActive = true
         scScroll.widthAnchor.constraint(equalToConstant: 380).isActive = true
         shortcutsStack.translatesAutoresizingMaskIntoConstraints = false
-        shortcutsStack.widthAnchor.constraint(equalTo: scScroll.widthAnchor, constant: -4).isActive = true
-        // Ancrer la liste en HAUT de la zone défilante (sinon la NSClipView non
-        // inversée colle le contenu en bas quand il ne remplit pas la hauteur).
-        shortcutsStack.topAnchor.constraint(equalTo: scScroll.contentView.topAnchor, constant: 4).isActive = true
+        shortcutsStack.widthAnchor.constraint(equalTo: scScroll.widthAnchor, constant: -12).isActive = true
         let addButton = NSButton(title: L("Add a shortcut…"), target: self, action: #selector(addShortcut))
         addButton.bezelStyle = .rounded
 
@@ -278,4 +304,10 @@ final class SettingsWindowController: NSObject {
         window?.close()
         HUD.show(L("Settings saved"))
     }
+}
+
+/// Vue à origine en haut : sert de document à une zone défilante dont le contenu
+/// doit partir du haut (liste des raccourcis presets).
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

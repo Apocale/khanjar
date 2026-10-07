@@ -51,6 +51,10 @@ final class SettingsStore {
     private var watcher: DispatchSourceFileSystemObject?
     private(set) var current = Settings.default
 
+    /// Documentation (render-media) : affiche des réglages d'exemple SANS rien écrire
+    /// sur le disque — les vrais réglages de l'utilisateur ne sont jamais touchés.
+    func preview(_ settings: Settings) { current = sanitized(settings) }
+
     var onChange: ((Settings) -> Void)?
 
     static var fileURL: URL {

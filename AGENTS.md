@@ -288,6 +288,7 @@ open dist/Khanjar.app                  # l'app est en barre de menus (LSUIElemen
 | `khanjar index-preview` | Aperçu hors ligne de l'index (alias, presets partiels) sans écrire le snapshot |
 | `khanjar index-preview <f.prfpset…>` | **Ce que verrait un monteur ayant CETTE bibliothèque** (pack acheté, presets d'un ami) : presets entrés dans la palette, écartés (audio, masque, Lumetri) et effets absents de ce Premiere |
 | `khanjar frequents [N]` | Classement fréquence+récence tel que la palette l'affichera (hors ligne) |
+| `Khanjar.app/Contents/MacOS/Khanjar render-media <dossier>` | Images du README dessinées par les VRAIES vues (palette, réglages, accueil) avec des presets d'exemple, hors écran (aucune permission d'enregistrement d'écran). Lancer depuis l'app pour afficher sa version. Assemblage : `public/docs/media/` |
 | `Khanjar.app/Contents/MacOS/Khanjar login-item on\|off\|status` | Démarrage avec la session (même mécanisme que la case de l'accueil, SMAppService) ; à lancer depuis le binaire DANS l'app |
 | `khanjar plan-dump "<preset>"` | Le plan EXACT que la palette appliquerait (effets, réglages, valeurs, keyframes), hors ligne |
 | `khanjar index-excluded <sortie.json>` | Chaque preset **écarté** de la palette avec sa raison (masque, couleur Lumetri, audio seul, effets absents) et le détail de ses effets/params, hors ligne |
@@ -581,6 +582,24 @@ C'est à l'utilisateur de juger à l'œil.
   factice (`KHANJAR_CONFIG_DIR=<dossier>`) : archive 1,6 Mo, signature vérifiée par `sign_update --verify`.
 - Contrepartie de la signature ad hoc : chaque mise à jour = nouveau CDHash → macOS redemande l'accès
   Documents (§5). Disparaîtra avec un Developer ID.
+
+## 10quater. Publication (2026-10-07)
+
+- **Dépôt public : https://github.com/Apocale/khanjar** (compte GitHub d'Isma « Apocale », publié avec
+  son accord explicite). Historique public NEUF, signé « Isma <117782129+Apocale@users.noreply.github.com> » ;
+  ce dépôt-ci (« Dagger 2.0 ») reste PRIVÉ et garde tout l'historique.
+- Clone local du dépôt public : `dist/public-repo` (dist/ est ignoré par git ici).
+- **Publier une nouvelle version** (dans l'ordre) :
+  1. monter `APP_VERSION` (`scripts/build-app.sh`), et la version du plugin si le ccx change ;
+  2. commiter ici ; `scripts/export-public.sh dist/public-repo --repo Apocale/khanjar --author "Isma <117782129+Apocale@users.noreply.github.com>" --update -m "Khanjar X.Y.Z"`
+     puis `git -C dist/public-repo push` ;
+  3. `scripts/release.sh` (lit `~/.config/khanjar/repo` = `Apocale/khanjar` et la clé EdDSA) ;
+  4. `gh release create vX.Y.Z dist/release/X.Y.Z/Khanjar-X.Y.Z.zip dist/release/X.Y.Z/appcast.xml --repo Apocale/khanjar --title "Khanjar X.Y.Z (beta)" --latest`
+     — JAMAIS `--prerelease` (§10ter).
+- 0.8.2 publiée et vérifiée de l'extérieur : flux `releases/latest/download/appcast.xml` → 200, version 0.8.2 ;
+  archive 1 620 489 o → 200. 20 topics (maximum GitHub), wiki et projects désactivés.
+- Description, topics et FAQ du README choisis pour la recherche (« command palette for Premiere Pro »,
+  « keyboard shortcut to a preset », presets d'un pack acheté…). Aucun nom de produit concurrent.
 
 ## 11. Conventions de travail attendues
 

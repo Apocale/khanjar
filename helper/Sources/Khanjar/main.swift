@@ -927,6 +927,75 @@ case "login-item":
     log.info("Démarrage de Khanjar avec la session : \(loginState) (\(Bundle.main.bundlePath))")
     exit(0)
 
+case "render-media":
+    // Images du README, dessinées par les VRAIES vues de Khanjar avec des exemples
+    // neutres (aucun preset personnel). Usage : render-media <dossier>
+    // Produit : palette (fréquents, recherche) en sombre et clair, frames d'une
+    // frappe « gauss » pour l'animation, réglages, accueil.
+    guard let outDir = arguments.dropFirst().first.map({ URL(fileURLWithPath: $0) }) else {
+        log.error("Usage : render-media <dossier>"); exit(2)
+    }
+    try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+    func demo(_ title: String, _ subtitle: String, kind: String = "preset", hint: String = "full") -> SearchItem {
+        SearchItem(id: "\(kind):demo-\(title)", kind: kind, title: title, subtitle: subtitle, keywords: [],
+                   plan: ApplyPlan(label: title, operations: [.init(matchName: "AE.ADBE Gaussian Blur 2")]),
+                   fidelityHint: hint)
+    }
+    let mine = "Preset · My Presets"
+    let slideUp = demo("Slide Up Text", mine), glow = demo("Glow + Shadow", mine)
+    let demoFrequent: [(item: SearchItem, count: Int)] = [
+        (glow, 214),
+        (SearchItem.combining(slideUp, glow, pairCount: 38) ?? slideUp, 38),
+        (slideUp, 96), (demo("Film Grain", mine), 61), (demo("Zoom In 120%", "Preset · Transitions"), 44),
+        (demo("Gaussian Blur", L("Video effect"), kind: "effect"), 40), (demo("Cinematic Vignette", "Preset · Color"), 27),
+        (demo("Drop Shadow", L("Video effect"), kind: "effect"), 19),
+    ]
+    let demoCatalog: [SearchItem] = demoFrequent.map(\.item) + [
+        demo("Gaussian Blur Fade In", "Preset · Transitions"), demo("Gaussian Blur Fade Out", "Preset · Transitions"),
+        demo("Camera Blur", L("Video effect"), kind: "effect"), demo("Directional Blur", L("Video effect"), kind: "effect"),
+        demo("Glow Pulse", mine), demo("True Drop Shadow", mine), demo("Tint", L("Video effect"), kind: "effect"),
+        demo("Fast Blur In", L("Adobe preset") + " · Blurs"), demo("Lens Distortion", L("Video effect"), kind: "effect"),
+        demo("Mosaic", L("Video effect"), kind: "effect"), demo("Wave Warp", L("Video effect"), kind: "effect"),
+        demo("Glitch Reveal", "Preset · Transitions", hint: "params:12/14"),
+    ]
+    let preparedDemo = Scorer.prepare(demoCatalog)
+    let palette = PaletteWindowController()
+    palette.maxResults = 8
+    palette.onFrequent = { limit in Array(demoFrequent.prefix(limit)) }
+    palette.onQuery = { query in Scorer.rank(query: query, prepared: preparedDemo, limit: 8) }
+    func write(_ data: Data?, _ name: String) {
+        guard let data else { log.error("Rendu raté : \(name)"); return }
+        try? data.write(to: outDir.appendingPathComponent(name))
+        log.info("  \(name) (\(data.count / 1024) Ko)")
+    }
+    for dark in [true, false] {
+        let mode = dark ? "dark" : "light"
+        write(palette.snapshotPNG(query: "", dark: dark), "palette-frequent-\(mode).png")
+        write(palette.snapshotPNG(query: "blur", dark: dark), "palette-search-\(mode).png")
+        write(palette.snapshotPNG(query: "tds", dark: dark), "palette-initials-\(mode).png")
+    }
+    // Frappe lettre par lettre (frames de l'animation du README)
+    for (i, q) in ["", "g", "ga", "gau", "gaus", "gauss"].enumerated() {
+        write(palette.snapshotPNG(query: q, dark: true), String(format: "typing-%02d.png", i))
+    }
+    let settingsStore = SettingsStore()
+    var demoSettings = Settings.default
+    demoSettings.presetShortcuts = [
+        PresetShortcut(itemId: glow.id, title: glow.title, shortcut: "ctrl+alt+g"),
+        PresetShortcut(itemId: slideUp.id, title: slideUp.title, shortcut: "ctrl+alt+s"),
+        PresetShortcut(itemId: "effect:demo-Gaussian Blur", title: "Gaussian Blur", shortcut: "ctrl+alt+b"),
+    ]
+    settingsStore.preview(demoSettings)   // en mémoire seulement
+    let settingsWindow = SettingsWindowController(store: settingsStore)
+    write(settingsWindow.snapshotPNG(dark: true), "settings-dark.png")
+    let welcome = OnboardingWindowController()
+    welcome.statusProvider = { LF("Connected — Premiere %@ · plugin %@", "26.5.2", "0.7.2") }
+    welcome.paletteShortcutProvider = { "⌘J" }
+    write(welcome.snapshotPNG(dark: true), "welcome-dark.png")
+    exit(0)
+
 case "index-excluded":
     // Diagnostic HORS LIGNE : chaque preset ÉCARTÉ de la palette, avec sa raison
     // (masque, couleur Lumetri, audio seul, effets absents de cette installation)
@@ -1074,6 +1143,6 @@ case "selftest":
     exit(SelfTest.run())
 
 default:
-    log.error("Mode inconnu : \(mode) (attendu : app | run | smoke | index-presets | index-preview | index-build | search | selftest | frequents | dump-selected | multi-test | apply-dump | anchor-test | stack-test | adj-test | fidelity-test | ease-probe | inspect-component | crash-test | crash-report | index-excluded | plan-dump | login-item)")
+    log.error("Mode inconnu : \(mode) (attendu : app | run | smoke | index-presets | index-preview | index-build | search | selftest | frequents | dump-selected | multi-test | apply-dump | anchor-test | stack-test | adj-test | fidelity-test | ease-probe | inspect-component | crash-test | crash-report | index-excluded | plan-dump | login-item | render-media)")
     exit(1)
 }

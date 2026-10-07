@@ -229,6 +229,19 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         })
     }
 
+    /// Documentation : la palette telle qu'elle s'afficherait pour `query`
+    /// (champ vide = fréquents), rendue hors écran. Voir Snapshot / render-media.
+    func snapshotPNG(query: String, dark: Bool) -> Data? {
+        field.stringValue = query
+        refresh()
+        // Hors écran la fenêtre n'est pas « active » : la sélection se dessinerait
+        // éteinte. On la montre comme dans l'app, où la palette a le focus.
+        if !results.isEmpty { table.rowView(atRow: 0, makeIfNecessary: true)?.isEmphasized = true }
+        guard let view = panel.contentView else { return nil }
+        let tint = dark ? NSColor(calibratedWhite: 0.16, alpha: 0.97) : NSColor(calibratedWhite: 0.985, alpha: 0.97)
+        return Snapshot.png(of: view, dark: dark, backdrop: tint)
+    }
+
     func toggle() {
         panel.isVisible ? hide() : show()
     }
