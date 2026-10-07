@@ -9,7 +9,7 @@ APP="$ROOT/dist/Khanjar.app"
 PLUGIN_VERSION=$(python3 -c "import json;print(json.load(open('$ROOT/plugin/manifest.json'))['version'])")
 # Version de l'APP native — découplée du plugin (le plugin ne change pas à
 # chaque évolution de l'UI/app ; éviter un réinstall inutile du ccx).
-APP_VERSION="0.8.2"
+APP_VERSION="0.8.3"
 
 # 0. Traductions : chaque texte L("…") du code doit avoir sa version française.
 python3 "$ROOT/scripts/check-l10n.py"
