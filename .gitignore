@@ -1,0 +1,14 @@
+# Artefacts de build (356 Mo — ne jamais versionner)
+helper/.build/
+dist/
+plugin/dist/
+
+# macOS
+.DS_Store
+
+# Journaux et fichiers temporaires de test
+*.log
+/tmp/
+
+# Dépendances récupérées par scripts/fetch-sparkle.sh (jamais versionnées)
+helper/Vendor/

@@ -1,0 +1,33 @@
+{
+  "id": "io.khanjar.executor",
+  "name": "Khanjar",
+  "version": "0.7.2",
+  "main": "index.js",
+  "manifestVersion": 5,
+  "host": {
+    "app": "premierepro",
+    "minVersion": "25.6.0"
+  },
+  "hostUIContext": {
+    "hideFromMenu": true
+  },
+  "requiredPermissions": {
+    "network": {
+      "domains": [
+        "ws://localhost/"
+      ]
+    },
+    "ipc": {
+      "enablePluginCommunication": true
+    }
+  },
+  "entrypoints": [
+    {
+      "type": "command",
+      "id": "khanjar.internal",
+      "label": {
+        "default": "- Khanjar (interne)"
+      }
+    }
+  ]
+}
