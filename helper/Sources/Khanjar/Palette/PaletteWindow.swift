@@ -84,12 +84,10 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         panel.hidesOnDeactivate = false
         panel.onCancel = { [weak self] in self?.hide() }
 
-        let background = NSVisualEffectView()
-        background.material = .menu
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 12
-        background.layer?.masksToBounds = true
+        // Fond UNI, comme sur les images du site (2026-10-07, demande d'Isma) : le
+        // verre translucide (.menu) laissait voir Premiere en flou derrière, plus
+        // difficile à lire et différent de ce que montre la page GitHub.
+        let background = PaletteBackgroundView()
         panel.contentView = background
 
         // Champ de recherche
@@ -157,6 +155,10 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
 
     func show() {
         isClosing = false
+        // Calque activé à l'affichage (et pas à la création) : les animations pop en
+        // ont besoin à l'écran, mais hors écran il empêchait de dessiner la ligne
+        // sélectionnée dans les images du README (constaté le 2026-10-07).
+        panel.contentView?.wantsLayer = true
         field.stringValue = ""
         // Champ vide = classement fréquence + récence, prêt à l'emploi : la
         // palette ne s'ouvre plus sur une liste vide qui attend une frappe.
@@ -232,14 +234,21 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     /// Documentation : la palette telle qu'elle s'afficherait pour `query`
     /// (champ vide = fréquents), rendue hors écran. Voir Snapshot / render-media.
     func snapshotPNG(query: String, dark: Bool) -> Data? {
+        // Apparence posée AVANT de remplir la liste : en changer après recrée les
+        // lignes et efface la sélection forcée ci-dessous.
+        panel.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         field.stringValue = query
         refresh()
+        panel.contentView?.layoutSubtreeIfNeeded()
         // Hors écran la fenêtre n'est pas « active » : la sélection se dessinerait
         // éteinte. On la montre comme dans l'app, où la palette a le focus.
-        if !results.isEmpty { table.rowView(atRow: 0, makeIfNecessary: true)?.isEmphasized = true }
+        if !results.isEmpty, let row = table.rowView(atRow: 0, makeIfNecessary: true) {
+            row.isEmphasized = true
+            row.needsDisplay = true
+        }
         guard let view = panel.contentView else { return nil }
-        let tint = dark ? NSColor(calibratedWhite: 0.16, alpha: 0.97) : NSColor(calibratedWhite: 0.985, alpha: 0.97)
-        return Snapshot.png(of: view, dark: dark, backdrop: tint)
+        // Le fond est désormais peint par la vue elle-même : le rendu = l'app.
+        return Snapshot.png(of: view, dark: dark)
     }
 
     func toggle() {
@@ -328,6 +337,10 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
 
     func numberOfRows(in tableView: NSTableView) -> Int { results.count }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        PaletteRowView()
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry = results[row]
         let cell = NSTableCellView()
@@ -395,5 +408,47 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
             if parts.count == 2, let a = Int(parts[0]), let b = Int(parts[1]), a < b { incomplete = true }
         }
         return incomplete ? L("partial") : nil
+    }
+}
+
+/// Fond de la palette : gris uni, arrondi, qui suit l'apparence (sombre / clair).
+/// Dessiné en draw(_:) (et non en propriété de calque) pour que le rendu hors écran
+/// des images du README (Snapshot) soit identique, pixel pour pixel, à l'écran.
+final class PaletteBackgroundView: NSView {
+    static let darkFill = NSColor(calibratedWhite: 0.16, alpha: 0.97)
+    static let lightFill = NSColor(calibratedWhite: 0.985, alpha: 0.97)
+    static let cornerRadius: CGFloat = 12
+
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        (dark ? Self.darkFill : Self.lightFill).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+/// Ligne de la palette : la sélection est peinte ici, en bleu plein comme sur le site.
+/// AppKit ne la dessinait pas dans le rendu hors écran des images (le texte passait
+/// en blanc mais le fond bleu manquait) ; la peindre soi-même rend l'écran et les
+/// images identiques.
+final class PaletteRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        (isEmphasized ? NSColor.selectedContentBackgroundColor : NSColor.unemphasizedSelectedContentBackgroundColor).setFill()
+        bounds.fill()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // Hors écran, drawSelection n'est pas toujours appelé par AppKit.
+        if isSelected, NSGraphicsContext.current?.isDrawingToScreen == false {
+            drawSelection(in: dirtyRect)
+        }
     }
 }
