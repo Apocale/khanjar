@@ -12,7 +12,7 @@ selected clip, in a single undo step.
   <img src="docs/media/demo.gif" width="720" alt="Press ⌘J, type “gauss”, press Enter: Gaussian Blur is applied to the selected clips">
 </p>
 
-<p align="center"><a href="https://github.com/Apocale/khanjar/releases/latest"><b>Download the latest version</b></a> · <a href="docs/INSTALL.md">Install in 3 minutes</a> · <a href="docs/INSTALL.fr.md">En français</a></p>
+<p align="center"><a href="https://github.com/Apocale/khanjar/releases/latest"><b>Download the latest version</b></a> · <a href="docs/INSTALL.md">Install in 3 minutes</a> · <a href="docs/INSTALL.md#install-with-claude-code-easiest">Install with Claude Code</a> · <a href="docs/INSTALL.fr.md">En français</a></p>
 
 ## What it does
 
@@ -70,7 +70,8 @@ A *duo* (two presets you always chain) is one keystroke.
 
 ## Install
 
-Download the latest `Khanjar.zip` from [Releases](../../releases), then follow the
+Easiest: paste the [Claude Code install prompt](docs/INSTALL.md#install-with-claude-code-easiest) ([en français](docs/INSTALL.fr.md#installer-avec-claude-code-le-plus-simple)).
+Or download the latest `Khanjar.zip` from [Releases](../../releases), then follow the
 [installation guide](docs/INSTALL.md) ([en français](docs/INSTALL.fr.md)).
 The beta is not signed by Apple yet, so macOS asks you to confirm the first launch — the guide
 shows how, in two clicks.

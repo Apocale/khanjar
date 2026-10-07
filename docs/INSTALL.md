@@ -8,6 +8,46 @@ About 3 minutes. [Version française](INSTALL.fr.md)
 - Adobe Premiere Pro 2026 (26.x).
 - The Creative Cloud desktop app, signed in. Khanjar uses it to install its plugin in Premiere.
 
+## Install with Claude Code (easiest)
+
+If you have [Claude Code](https://claude.com/claude-code) on your Mac, paste this message into it: it does the whole install. Because the download goes through the terminal, macOS does not ask you to "Open Anyway".
+
+```text
+Install Khanjar for me, a free plugin for Adobe Premiere Pro (https://github.com/Apocale/khanjar).
+Don't touch any of my Premiere projects, never use sudo, and tell me each step in one line.
+
+1. Check the requirements and stop with an explanation if one is missing:
+   - Apple Silicon Mac: `uname -m` must print arm64;
+   - Premiere Pro 2026 installed: /Applications/Adobe Premiere Pro 2026;
+   - Creative Cloud desktop app installed: this file must exist:
+     "/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent"
+
+2. Download the latest version: get the .zip URL from
+   `curl -s https://api.github.com/repos/Apocale/khanjar/releases/latest`
+   (the browser_download_url ending in .zip), then download it to ~/Downloads with curl.
+
+3. Unzip it with `ditto -x -k` and put Khanjar.app in /Applications
+   (replace an older version if there is one, after telling me).
+
+4. Ask me to open Premiere Pro, wait for my confirmation, then run: `open /Applications/Khanjar.app`.
+   Warn me that macOS may ask for access to my Documents folder: I must click "Allow"
+   (that's where my presets are).
+
+5. Check that it works: ~/Library/Logs/Khanjar/Khanjar.log must show a line
+   "hello : io.khanjar.executor" within a minute.
+   If nothing after 1 minute, ask me to quit and reopen Premiere, then check again.
+   If it's still stuck, show me the last 20 lines of the log.
+
+6. Turn on launch at login:
+   `/Applications/Khanjar.app/Contents/MacOS/Khanjar login-item on`
+
+7. Finish by explaining in 4 lines: in Premiere, ⌘J opens the palette, I type the name of an effect
+   or preset, Enter applies it to the selected clips; ⌘⇧J adds an adjustment layer at the playhead
+   (create one once in the project first: File > New > Adjustment Layer).
+```
+
+Otherwise, follow the steps below by hand.
+
 ## 1. Download and move the app
 
 1. Download `Khanjar.zip` from the [latest release](https://github.com/Apocale/khanjar/releases/latest).

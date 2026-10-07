@@ -8,6 +8,46 @@ Environ 3 minutes. [English version](INSTALL.md)
 - Adobe Premiere Pro 2026 (26.x).
 - L'app Creative Cloud, connectée à ton compte. Khanjar s'en sert pour installer son plugin dans Premiere.
 
+## Installer avec Claude Code (le plus simple)
+
+Si tu as [Claude Code](https://claude.com/claude-code) sur ton Mac, colle-lui ce message : il fait toute l'installation. Le téléchargement passant par le terminal, macOS ne demande pas « Ouvrir quand même ».
+
+```text
+Installe-moi Khanjar, un plugin gratuit pour Adobe Premiere Pro (https://github.com/Apocale/khanjar).
+Ne touche à aucun de mes projets Premiere, n'utilise jamais sudo, et dis-moi chaque étape en une ligne.
+
+1. Vérifie les prérequis et arrête-toi en m'expliquant si l'un manque :
+   - Mac Apple Silicon : `uname -m` doit répondre arm64 ;
+   - Premiere Pro 2026 installé : /Applications/Adobe Premiere Pro 2026 ;
+   - app Creative Cloud installée : ce fichier doit exister :
+     "/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS/UnifiedPluginInstallerAgent"
+
+2. Télécharge la dernière version : récupère l'adresse du .zip avec
+   `curl -s https://api.github.com/repos/Apocale/khanjar/releases/latest`
+   (champ browser_download_url qui finit par .zip), puis télécharge-le dans ~/Downloads avec curl.
+
+3. Décompresse-le avec `ditto -x -k` et place Khanjar.app dans /Applications
+   (remplace une ancienne version si elle existe, après me l'avoir dit).
+
+4. Demande-moi d'ouvrir Premiere Pro, attends ma confirmation, puis lance : `open /Applications/Khanjar.app`.
+   Préviens-moi que macOS peut demander l'accès à mon dossier Documents : je dois cliquer « Autoriser »
+   (c'est là que sont mes presets).
+
+5. Vérifie que ça marche : dans ~/Library/Logs/Khanjar/Khanjar.log, une ligne
+   « hello : io.khanjar.executor » doit apparaître dans la minute.
+   Si rien après 1 minute, demande-moi de quitter et rouvrir Premiere, puis revérifie.
+   Si ça bloque encore, montre-moi les 20 dernières lignes du journal.
+
+6. Active le démarrage automatique :
+   `/Applications/Khanjar.app/Contents/MacOS/Khanjar login-item on`
+
+7. Termine en m'expliquant en 4 lignes : dans Premiere, ⌘J ouvre la palette, je tape le nom d'un effet
+   ou d'un preset, Entrée l'applique aux clips sélectionnés ; ⌘⇧J pose un calque d'effets à la tête de
+   lecture (il faut en avoir créé un une fois dans le projet : Fichier > Nouveau > Calque d'effets).
+```
+
+Sinon, suis les étapes ci-dessous à la main.
+
 ## 1. Télécharger et ranger l'app
 
 1. Télécharge `Khanjar.zip` depuis la [dernière version](https://github.com/Apocale/khanjar/releases/latest).
