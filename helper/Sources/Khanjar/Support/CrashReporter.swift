@@ -43,6 +43,8 @@ enum CrashReporter {
     }
 
     static let maxFrames = 40
+    /// Vrai pendant un envoi (lu et écrit sur le fil principal).
+    private static var sending = false
     static let maxReportsPerLaunch = 3
     static let maxAgeDays = 14.0
 
@@ -93,7 +95,11 @@ enum CrashReporter {
     static func scrub(_ text: String) -> String {
         var s = text
         let rules: [(String, String)] = [
-            (#"(?:/[^/\s:"']+)+/([^/\s:"']+)"#, "$1"),          // /Users/x/projet/Fichier.swift → Fichier.swift
+            // Chemin absolu (espaces compris) → masqué en entier. Avant (audit du
+            // 2026-10-07), « /Users/Jean Dupont/…/Client Nike.prproj » laissait passer
+            // « Jean Dupont » et le nom du projet. Les chemins RELATIFS de Swift
+            // (« Khanjar/AppCoordinator.swift:42 ») ne commencent pas par / et restent.
+            (#"/(?:Users|Volumes|private|tmp|var|Applications|Library|System|opt)/[^"'\n]*"#, "<chemin>"),
             (#""[^"]*""#, "\"…\""), (#"“[^”]*”"#, "“…”"), (#"«[^»]*»"#, "«…»"), (#"'[^']*'"#, "'…'"),
         ]
         for (pattern, template) in rules {
@@ -211,8 +217,11 @@ enum CrashReporter {
     /// inutile de réessayer à chaque lancement) ; sur erreur réseau ou 5xx, il attend le
     /// lancement suivant.
     static func sendPendingIfConsented(_ consented: Bool, pluginVersion: String?, log: Logger = .shared) {
-        guard consented, let dsn = configuredDSN, let endpoint = endpoint(dsn: dsn) else { return }
+        guard consented, let dsn = configuredDSN, let endpoint = endpoint(dsn: dsn), !sending else { return }
+        // Un seul envoi à la fois (lancement + case cochée juste après = doublons).
+        sending = true
         DispatchQueue.global(qos: .utility).async {
+            defer { DispatchQueue.main.async { sending = false } }
             var sent = loadSent()
             let pending = pendingReports(alreadySent: sent).prefix(maxReportsPerLaunch)
             guard !pending.isEmpty else { return }

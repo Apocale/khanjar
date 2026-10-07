@@ -140,15 +140,22 @@ enum PrfpsetParser {
         let roots = byId.values.filter { $0.name == "BinTreeItem" && !childRefs.contains(objectId(of: $0) ?? "") }
 
         var presets: [ParsedPreset] = []
+        var visited = Set<String>()
         for rootBin in roots {
-            walkBin(rootBin, path: [], byId: byId, into: &presets)
+            walkBin(rootBin, path: [], byId: byId, visited: &visited, into: &presets)
         }
         return presets
     }
 
     // MARK: - Parcours de l'arbre
 
-    private static func walkBin(_ bin: XMLElement, path: [String], byId: [String: XMLElement], into presets: inout [ParsedPreset]) {
+    private static func walkBin(_ bin: XMLElement, path: [String], byId: [String: XMLElement],
+                                visited: inout Set<String>, into presets: inout [ParsedPreset]) {
+        // Un fichier abîmé ou fabriqué (dossier qui se contient lui-même) ferait boucler
+        // la récursion jusqu'au plantage, à chaque reconstruction de l'index.
+        if let oid = objectId(of: bin) {
+            guard visited.insert(oid).inserted else { return }
+        }
         let name = treeItemName(of: bin)
         // La racine s'appelle "Root" : exclue du chemin utilisateur
         let childPath = (path.isEmpty && name == "Root") ? [] : path + [name].compactMap { $0 }
@@ -157,7 +164,7 @@ enum PrfpsetParser {
             guard let child = byId[ref] else { continue }
             switch child.name {
             case "BinTreeItem":
-                walkBin(child, path: childPath, byId: byId, into: &presets)
+                walkBin(child, path: childPath, byId: byId, visited: &visited, into: &presets)
             case "TreeItem":
                 if let preset = parseLeaf(child, path: childPath, byId: byId) {
                     presets.append(preset)

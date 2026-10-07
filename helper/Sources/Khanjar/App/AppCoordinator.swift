@@ -68,6 +68,7 @@ final class AppCoordinator {
         server.onHello = { [weak self] info in
             self?.log.info("Plugin prêt : \(info.pluginVersion) / Premiere \(info.hostVersion)")
             self?.pluginWaitSince = nil
+            self?.pluginSilentSince = nil
             if let message = self?.pluginLifecycle.reconcile(installedVersion: info.pluginVersion) {
                 HUD.show(message)
             }
@@ -104,6 +105,7 @@ final class AppCoordinator {
         }
         server.onDisconnect = { [weak self] in
             guard let self else { return }
+            self.pluginSilentSince = Date()
             self.log.info("Plugin déconnecté — reconnexion attendue")
             // Un plugin VIVANT se reconnecte seul en 2 s (WsClient). S'il ne
             // revient pas, c'est qu'Adobe ne le charge plus — constaté le
@@ -123,7 +125,7 @@ final class AppCoordinator {
         // en laissant le journal se vider (écriture asynchrone).
         server.onListenerFailed = { [weak self] error in
             guard let self else { return }
-            self.listenRetries += 1
+            self.listenRetries += 1   // remis à zéro dès que le pont écoute (onListenerReady)
             if self.listenRetries <= 5 {
                 self.log.info("Port occupé (\(error)) — nouvel essai \(self.listenRetries)/5 dans 1 s")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { try? self.server.start() }
@@ -132,6 +134,8 @@ final class AppCoordinator {
             self.log.error("Bridge indisponible (\(error)) — une autre instance de Khanjar tourne ? Arrêt.")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(1) }
         }
+        // Sans remise à zéro, 6 échecs cumulés sur toute la vie de l'app suffisaient à l'arrêter.
+        server.onListenerReady = { [weak self] in self?.listenRetries = 0 }
         try server.start()
 
         // 3. Réglages (chargés avant hotkey/palette, appliqués à chaud ensuite)
@@ -245,6 +249,8 @@ final class AppCoordinator {
     ///     réinstallation FORCÉE (dossier présent mais non chargé : enregistrement
     ///     UPIA incohérent), en arrière-plan.
     private var pluginWaitSince: Date?
+    /// Depuis quand aucun plugin n'est connecté (lancement de l'app ou déconnexion).
+    private var pluginSilentSince: Date? = Date()
     private func installPluginIfPremiereRunning() {
         guard !server.isReady else { return }
         guard let premiere = NSWorkspace.shared.runningApplications
@@ -385,10 +391,20 @@ final class AppCoordinator {
             // ce qui envoie chercher le problème au mauvais endroit.
             let premiereRunning = NSWorkspace.shared.runningApplications
                 .contains { $0.bundleIdentifier?.hasPrefix("com.adobe.PremierePro") == true }
-            if premiereRunning {
+            if let premiere = NSWorkspace.shared.runningApplications
+                .first(where: { $0.bundleIdentifier?.hasPrefix("com.adobe.PremierePro") == true }), premiereRunning {
                 HUD.show(L("Khanjar is reconnecting to Premiere…"), duration: 3)
-                log.info("Invocation sans plugin connecté alors que Premiere tourne — relance du filet")
-                revivePluginIfStillSilent()
+                // Réinstaller SEULEMENT si le plugin est muet depuis plus de 45 s et que
+                // Premiere a fini de démarrer. Avant (audit du 2026-10-07), ⌘J pendant
+                // le lancement de Premiere ou une reconnexion de 2 s lançait UPIA tout
+                // de suite : le blocage de 3 min du §6, puis 10 min sans nouvel essai.
+                let silentFor = pluginSilentSince.map { Date().timeIntervalSince($0) } ?? 0
+                if premiere.isFinishedLaunching, silentFor >= Self.pluginRevivalDelay {
+                    log.info("Invocation sans plugin depuis \(Int(silentFor)) s, Premiere ouvert — relance du filet")
+                    revivePluginIfStillSilent()
+                } else {
+                    log.info("Invocation sans plugin depuis \(Int(silentFor)) s — trop tôt pour réinstaller, on attend")
+                }
             } else {
                 HUD.show(L("Open Premiere Pro to use Khanjar"), duration: 3)
                 log.info("Invocation sans plugin connecté (Premiere fermé)")

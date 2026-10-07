@@ -24,18 +24,22 @@ Ne touche à aucun de mes projets Premiere, n'utilise jamais sudo, et dis-moi ch
 
 2. Télécharge la dernière version : récupère l'adresse du .zip avec
    `curl -s https://api.github.com/repos/Apocale/khanjar/releases/latest`
-   (champ browser_download_url qui finit par .zip), puis télécharge-le dans ~/Downloads avec curl.
+   (champ browser_download_url qui finit par .zip, pas appcast.xml), puis télécharge-le avec
+   `curl -fL -o ~/Downloads/Khanjar.zip "<cette adresse>"`.
 
-3. Décompresse-le avec `ditto -x -k` et place Khanjar.app dans /Applications
-   (remplace une ancienne version si elle existe, après me l'avoir dit).
+3. Décompresse-le dans un dossier temporaire neuf : `ditto -x -k ~/Downloads/Khanjar.zip "$(mktemp -d)"`.
+   Si Khanjar tourne déjà, quitte-le d'abord : `osascript -e 'quit app "Khanjar"'`.
+   Place Khanjar.app dans /Applications (remplace une ancienne version après me l'avoir dit).
+   Si /Applications n'est pas modifiable sans sudo, arrête-toi et dis-le-moi.
 
 4. Demande-moi d'ouvrir Premiere Pro, attends ma confirmation, puis lance : `open /Applications/Khanjar.app`.
    Préviens-moi que macOS peut demander l'accès à mon dossier Documents : je dois cliquer « Autoriser »
    (c'est là que sont mes presets).
 
-5. Vérifie que ça marche : dans ~/Library/Logs/Khanjar/Khanjar.log, une ligne
-   « hello : io.khanjar.executor » doit apparaître dans la minute.
-   Si rien après 1 minute, demande-moi de quitter et rouvrir Premiere, puis revérifie.
+5. Vérifie que ça marche : avant l'étape 4, note le nombre de lignes de ~/Library/Logs/Khanjar/Khanjar.log
+   (0 s'il n'existe pas). Après l'étape 4, une NOUVELLE ligne contenant « hello : io.khanjar.executor »
+   doit apparaître dans les 3 minutes (l'installation du plugin peut prendre ce temps).
+   Si rien après 3 minutes, demande-moi de quitter et rouvrir Premiere, puis revérifie.
    Si ça bloque encore, montre-moi les 20 dernières lignes du journal.
 
 6. Active le démarrage automatique :
@@ -50,7 +54,7 @@ Sinon, suis les étapes ci-dessous à la main.
 
 ## 1. Télécharger et ranger l'app
 
-1. Télécharge `Khanjar.zip` depuis la [dernière version](https://github.com/Apocale/khanjar/releases/latest).
+1. Télécharge `Khanjar-<version>.zip` (pas `appcast.xml`) depuis la [dernière version](https://github.com/Apocale/khanjar/releases/latest).
 2. Double-clique le zip pour le décompresser.
 3. Glisse **Khanjar.app** dans ton dossier **Applications**.
 
@@ -61,14 +65,17 @@ macOS bloque la première fois les apps qui ne sont pas validées par Apple. Tu 
 **macOS 15 Sequoia et plus récent**
 1. Double-clique **Khanjar** dans Applications. macOS dit qu'il n'a pas pu vérifier l'app : clique **Terminé** (pas « Placer dans la corbeille »).
 2. Ouvre **Réglages Système > Confidentialité et sécurité** et descends jusqu'à **Sécurité**.
-3. À côté de *« Khanjar » a été bloqué*, clique **Ouvrir quand même**, puis confirme avec ton mot de passe.
+3. À côté de *« Khanjar » a été bloqué*, clique **Ouvrir quand même**, confirme avec ton mot de passe,
+   puis reclique sur **Ouvrir quand même** dans la fenêtre qui s'ouvre.
 
 **macOS 14 et plus ancien**
 Clic droit sur **Khanjar** dans Applications > **Ouvrir** > **Ouvrir**.
 
 ## 3. Laisser Khanjar s'installer
 
-1. Une icône ✦ apparaît dans la barre de menus, et une fenêtre d'accueil s'ouvre.
+1. Une icône en forme de baguette magique apparaît dans la barre de menus, et une fenêtre d'accueil s'ouvre.
+   Coche **Lancer Khanjar au démarrage de la session** (décochée par défaut), pour que Khanjar soit prêt
+   après un redémarrage, puis clique **Commencer**.
 2. macOS peut demander l'accès à ton dossier **Documents** : clique **Autoriser**.
    Tes propres presets Premiere y sont rangés ; sans cet accès, ils manquent dans la palette.
 3. Si Premiere est ouvert, Khanjar y installe son plugin tout seul. Sinon, ça se fera à sa prochaine ouverture.
@@ -85,7 +92,8 @@ Dans Premiere Pro, sélectionne un ou plusieurs clips dans la timeline, presse *
 ## Mises à jour
 
 Au deuxième lancement, Khanjar demande s'il peut vérifier les mises à jour automatiquement : dis oui,
-et les nouvelles versions s'installent toutes seules (signées : seules les vraies versions de Khanjar
+et Khanjar te propose chaque nouvelle version (coche *Télécharger et installer automatiquement* pour ne plus
+avoir la question ; les mises à jour sont signées : seules les vraies versions de Khanjar
 sont acceptées). Tu peux aussi passer par l'icône de la barre de menus > **Rechercher les mises à jour…**.
 Après une mise à jour, macOS peut redemander l'accès à ton dossier Documents : clique **Autoriser**
 (ça disparaîtra quand Khanjar sera signé par Apple).
@@ -94,9 +102,9 @@ Après une mise à jour, macOS peut redemander l'accès à ton dossier Documents
 
 | Ce que tu vois | Quoi faire |
 |---|---|
-| « Ouvre Premiere Pro pour utiliser Khanjar » alors que Premiere est ouvert | Attends 1 minute (Khanjar réinstalle son plugin tout seul). Toujours là ? Quitte et rouvre Premiere. |
+| « Khanjar se reconnecte à Premiere… » (ou « Ouvre Premiere Pro pour utiliser Khanjar ») alors que Premiere est ouvert | Attends 1 minute (Khanjar réinstalle son plugin tout seul). Toujours là ? Quitte et rouvre Premiere. |
 | « Creative Cloud requis pour installer le plugin Khanjar » | Installe l'app Creative Cloud, connecte-toi, puis relance Khanjar. |
-| ⌘J ne fait rien | Khanjar ne réagit que quand Premiere est l'app active. Vérifie que l'icône ✦ est dans la barre de menus. |
+| ⌘J ne fait rien | Khanjar ne réagit que quand Premiere est l'app active. Vérifie que l'icône en forme de baguette magique est dans la barre de menus (après un redémarrage, ouvre Khanjar depuis Applications). |
 | Un preset est marqué *partiel* | Un de ses effets n'existe plus dans ta version de Premiere, ou un de ses réglages ne peut pas être posé par l'API d'Adobe. Le reste est appliqué. |
 | Un preset manque dans la palette | Il utilise une forme de masque, ou des courbes, roues ou LUT Lumetri, que l'API d'Adobe ne permet pas de poser : Khanjar l'écarte plutôt que de l'appliquer de travers. Les presets Lumetri qui ne bougent que des curseurs sont bien là. Les presets uniquement audio ne sont pas encore gérés. |
 | Tes presets n'apparaissent pas | Réglages Système > Confidentialité et sécurité > Fichiers et dossiers > Khanjar : active **Documents**. |

@@ -43,8 +43,10 @@ final class Logger {
             guard let data = line.data(using: .utf8) else { return }
             if FileManager.default.fileExists(atPath: fileURL.path),
                let handle = try? FileHandle(forWritingTo: fileURL) {
-                handle.seekToEndOfFile()
-                handle.write(data)
+                // write(contentsOf:) lève une erreur Swift ; write(_:) levait une exception
+                // Objective-C (disque plein…) qui faisait planter l'app.
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
                 try? handle.close()
             } else {
                 try? data.write(to: fileURL)

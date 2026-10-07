@@ -66,12 +66,18 @@ final class SettingsStore {
 
     /// Écrit les réglages (le watcher déclenchera onChange → application à chaud).
     func save(_ settings: Settings) {
+        let before = current
         current = sanitized(settings)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(current) {
             try? data.write(to: Self.fileURL, options: .atomic)
         }
+        // Appliquer TOUT DE SUITE. Avant (audit du 2026-10-07), on comptait sur le
+        // watcher du fichier : mais `current` étant déjà à jour, il ne voyait aucune
+        // différence et n'appelait jamais onChange → un nouveau raccourci preset ou
+        // un changement de ⌘J ne marchait qu'après un redémarrage de Khanjar.
+        if current != before { onChange?(current) }
     }
 
     func load() {
@@ -86,8 +92,9 @@ final class SettingsStore {
            let parsed = try? JSONDecoder().decode(Settings.self, from: data) {
             current = sanitized(parsed)
         } else {
-            log.error("settings.json illisible — réglages par défaut conservés")
-            current = .default
+            // Fichier abîmé (édité à la main…) : on GARDE le dernier état valide. Revenir
+            // aux défauts aurait effacé les raccourcis presets au prochain enregistrement.
+            log.error("settings.json illisible — derniers réglages valides conservés")
         }
         watch()
     }

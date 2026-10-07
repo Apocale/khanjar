@@ -24,6 +24,7 @@ final class BridgeServer {
     var onDisconnect: (() -> Void)?
     /// Échec définitif du listener (ex. port déjà pris par une autre instance).
     var onListenerFailed: ((Error) -> Void)?
+    var onListenerReady: (() -> Void)?
 
     var isReady: Bool { connection != nil && hello != nil }
 
@@ -52,7 +53,7 @@ final class BridgeServer {
         // extensions de navigateur). Le plugin UXP, lui, n'est pas une page.
         wsOptions.setClientRequestHandler(.main) { [weak self] subprotocols, headers in
             let origin = headers.first { $0.name.lowercased() == "origin" }?.value
-            if let origin, Self.isWebOrigin(origin) {
+            if let origin, Self.isRefusedOrigin(origin) {
                 self?.log.error("Connexion refusée : origine web « \(origin) » — une page internet ne peut pas piloter Khanjar")
                 return NWProtocolWebSocket.Response(status: .reject, subprotocol: nil)
             }
@@ -64,7 +65,9 @@ final class BridgeServer {
         let listener = try NWListener(using: params)
         listener.stateUpdateHandler = { [weak self] state in
             switch state {
-            case .ready: self?.log.info("Bridge en écoute sur ws://127.0.0.1:\(self?.port ?? 0)")
+            case .ready:
+                self?.log.info("Bridge en écoute sur ws://127.0.0.1:\(self?.port ?? 0)")
+                self?.onListenerReady?()
             case .failed(let error):
                 self?.log.error("Listener en échec : \(error)")
                 self?.onListenerFailed?(error)
@@ -81,11 +84,12 @@ final class BridgeServer {
     /// Origines émises par un navigateur (page web ou extension). Comparaison
     /// sur le schéma seulement : « null » (fichier local) et l'absence d'en-tête
     /// restent acceptés tant qu'on n'a pas relevé ce qu'envoie le plugin UXP.
-    static func isWebOrigin(_ origin: String) -> Bool {
-        let value = origin.trimmingCharacters(in: .whitespaces).lowercased()
-        let webSchemes = ["http://", "https://", "chrome-extension://", "moz-extension://",
-                          "safari-web-extension://", "edge-extension://"]
-        return webSchemes.contains { value.hasPrefix($0) }
+    /// Liste BLANCHE : seul le plugin UXP est admis ; il s'annonce `file://` (relevé
+    /// en vrai le 2026-10-06) ou sans en-tête. Tout le reste est refusé, y compris
+    /// `null` : une page web enfermée dans une iframe « sandbox » ou une URL `data:`
+    /// envoie `Origin: null` et passait l'ancienne liste noire (audit du 2026-10-07).
+    static func isRefusedOrigin(_ origin: String) -> Bool {
+        !origin.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("file://")
     }
 
     /// Journalise UNE fois l'origine annoncée par un client accepté : c'est la

@@ -182,6 +182,13 @@ final class PluginLifecycleService {
             DispatchQueue.main.async {
                 self.busy = false
                 guard !result.timedOut else { return }
+                // Marqueur posé seulement si le retrait est acquis (réussi, ou -406 = déjà
+                // absent). Sur une autre erreur d'UPIA (Poco::SystemException…), on
+                // retentera au prochain lancement au lieu d'abandonner pour toujours.
+                guard result.ok || result.output.contains("-406") else {
+                    self.log.error("Retrait de l'ancien plugin non abouti — nouvel essai au prochain lancement")
+                    return
+                }
                 try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(),
                                                          withIntermediateDirectories: true)
                 try? Data().write(to: marker)

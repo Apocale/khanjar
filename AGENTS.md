@@ -16,7 +16,7 @@
 > Fichier de contexte canonique. Lis-le **en entier** avant de modifier quoi que ce soit.
 > Il contient du savoir empirique coûteux (des heures de débogage dans Premiere) qui
 > n'est déductible ni du code ni de la documentation Adobe.
-> Dernière mise à jour : 2026-10-06 — app v0.8.1 (Khanjar) / plugin v0.7.1 — Premiere **26.5.2**.
+> Dernière mise à jour : 2026-10-07 — app v0.8.3 (Khanjar, publiée sur GitHub) / plugin v0.7.2 — Premiere **26.5.2**.
 > Plugin v0.7.1 / app v0.8.1 : **presets d'un Premiere d'une autre langue** — les noms de
 > paramètres d'un .prfpset sont localisés, un nom différent ne fait plus sauter le réglage quand
 > la structure de l'effet est identique (§3.2 item 7). Profil de presets choisi selon la version
@@ -39,9 +39,9 @@
 
 ## 1. Le produit en une phrase
 
-**Dagger** est une palette de commande type Spotlight pour **Adobe Premiere Pro 2026 (macOS)** :
+**Khanjar** (ex-Dagger) est une palette de commande type Spotlight pour **Adobe Premiere Pro 2026 (macOS)** :
 ⌘J ouvre une fenêtre de recherche floue sur tous les effets et presets ; Entrée applique au(x)
-clip(s) sélectionné(s) et referme. ⌘&lt; ajoute un calque d'effets à la tête de lecture.
+clip(s) sélectionné(s) et referme. ⌘⇧J ajoute un calque d'effets à la tête de lecture.
 
 ## 2. Architecture — et pourquoi elle est ainsi
 
@@ -231,7 +231,7 @@ Ces points ont chacun coûté des heures. Ne pas les « simplifier » sans preuv
    « Skalierung » de_DE, « Escala » es_ES…). `<ParameterID>` vaut -1 partout et `ComponentParam`
    n'expose que `displayName` : AUCUN identifiant de paramètre indépendant de la langue.
    Jusqu'au plugin 0.7.0, un nom ≠ suffisait à sauter le paramètre → un pack anglais (le cas de
-   tous les packs du commerce relevés sur SSD 2) chez un monteur dont Premiere est en français
+   tous les packs du commerce relevés sur le disque de l'auteur) chez un monteur dont Premiere est en français
    n'appliquait que Position/Rotation : simulé 4/12 réglages d'un Transform, zooms et fondus
    perdus. Jamais vu chez Isma (Premiere en anglais, presets anglais : 0 `NAME_MISMATCH` dans
    le journal). Règle depuis 0.7.1 (`apply.js::buildParamActions`) : noms comparés sans casse,
@@ -495,7 +495,7 @@ Protections en place : **verrou flock** (`~/Library/Application Support/Khanjar/
 | Filtre piste audio (plugin 0.6.8) | ✅ **Vérifié par 11 jours d'usage réel** (ligne ci-dessus) — plus besoin de test manuel |
 | Désinscription UPIA après maj Premiere (2026-10-06) | Reproduit en vrai : plugin absent de `--list`, `--remove` → -406, `--install` seul répare, reconnexion en ~2 s. Filet 0.7.4 posé ; **le déclencheur à 45 s n'a pas été exercé bout-en-bout** (l'action de réparation, elle, l'a été à la main) |
 | Alias `AE.ADBE Geometry`→`Geometry2` (app 0.7.1) | ⏳ **À vérifier** : `apply-dump <média> "Zoom IN - Right"` → Transform posé avec ses 12 params |
-| Bibliothèques d'AUTRES monteurs (2026-10-06, `index-preview <pack>`, inventaire 26.5.2) | 8 packs du commerce/de cours trouvés sur SSD 2 (Finzar, Essential Motion v3, Tech Wampus, Glass Effects, Apple Style, 10 Smooth Zoom, Finzar Shake, pack de cours) : **324 presets → 260 dans la palette (253 complets)** ; écartés : 26 audio seul, 25 masques, 8 Lumetri, 5 sans effet disponible. Tous en noms ANGLAIS. Hors Premiere seulement : l'application réelle d'un pack n'a pas été rejouée |
+| Bibliothèques d'AUTRES monteurs (2026-10-06, `index-preview <pack>`, inventaire 26.5.2) | 8 packs du commerce/de cours trouvés sur le disque de l'auteur (Finzar, Essential Motion v3, Tech Wampus, Glass Effects, Apple Style, 10 Smooth Zoom, Finzar Shake, pack de cours) : **324 presets → 260 dans la palette (253 complets)** ; écartés : 26 audio seul, 25 masques, 8 Lumetri, 5 sans effet disponible. Tous en noms ANGLAIS. Hors Premiere seulement : l'application réelle d'un pack n'a pas été rejouée |
 | Presets d'une autre langue (plugin 0.7.1, 2026-10-06, **Premiere 26.5.2 réel**) | Test miroir : « 01_Zoom In » d'Essential Motion v3 aux noms français (copie du pack, seuls les `<Name>` traduits) dans le Premiere ANGLAIS d'Isma, `apply-dump <img> "01_Zoom In" --library <fichier>` : **12/12 posés, 0 sauté, `namesDiffer`=8** (preset « Point d'ancrage » / Premiere « Anchor Point » : preuve que `displayName` suit la langue de Premiere). Scale Height 100→200, 2 keyframes linéaires comme le preset. Avant (0.7.0) : ces 8 noms étaient sautés. Les presets Adobe fr_FR ne servent pas à ce test : leurs effets ont disparu de 26.5 (sauf Motion 6 params, structure ≠) |
 
 **Non vérifié** : l'exactitude **visuelle** dans le moniteur programme. Les tests prouvent que les

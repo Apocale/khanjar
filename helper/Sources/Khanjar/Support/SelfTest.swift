@@ -305,6 +305,18 @@ enum SelfTest {
         check(IndexStore.unreplayableReason([lumetri([neutralParam, usedParam, slider])]) == "couleur",
               "Lumetri avec une courbe : reste exclu")
 
+        // ── Garde-fous de l'audit du 2026-10-07 ──
+        print("── SelfTest : Garde-fous (audit) ──")
+        check(!BridgeServer.isRefusedOrigin("file://"), "le plugin UXP (Origin file://) est accepté")
+        check(BridgeServer.isRefusedOrigin("null") && BridgeServer.isRefusedOrigin("https://site.example")
+                && BridgeServer.isRefusedOrigin("chrome-extension://abc"),
+              "Origin null (iframe sandbox, data:), pages et extensions refusées")
+        let scrubbed = CrashReporter.scrub("NSFilePath=/Users/Jean Dupont/Movies/Client Nike final.prproj")
+        check(!scrubbed.contains("Jean") && !scrubbed.contains("Nike"),
+              "chemin avec espaces masqué en entier (« \(scrubbed) »)")
+        check(CrashReporter.scrub("Khanjar/AppCoordinator.swift:42: Fatal error").contains("AppCoordinator.swift:42"),
+              "chemin relatif du code Swift conservé")
+
         print(failures.isEmpty
               ? "SELFTEST OK (\(0) échec)"
               : "SELFTEST ÉCHEC : \(failures.count) cas — \(failures.joined(separator: " | "))")

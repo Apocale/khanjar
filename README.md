@@ -63,7 +63,7 @@ A *duo* (two presets you always chain) is one keystroke.
 
 ## Requirements
 
-- A Mac with **Apple Silicon** (M1 or later).
+- A Mac with **Apple Silicon** (M1 or later), macOS 13 or later (tested on macOS 26).
 - **Adobe Premiere Pro 2026** (version 26.x) and the **Creative Cloud** desktop app, which installs
   Khanjar's companion plugin inside Premiere.
 - Tested on macOS 26 with Premiere Pro 26.5.
@@ -71,10 +71,10 @@ A *duo* (two presets you always chain) is one keystroke.
 ## Install
 
 Easiest: paste the [Claude Code install prompt](docs/INSTALL.md#install-with-claude-code-easiest) ([en français](docs/INSTALL.fr.md#installer-avec-claude-code-le-plus-simple)).
-Or download the latest `Khanjar.zip` from [Releases](../../releases), then follow the
+Or download the latest `Khanjar-<version>.zip` from [Releases](../../releases), then follow the
 [installation guide](docs/INSTALL.md) ([en français](docs/INSTALL.fr.md)).
 The beta is not signed by Apple yet, so macOS asks you to confirm the first launch — the guide
-shows how, in two clicks.
+shows how (once, about a minute).
 
 ## Known limits
 
