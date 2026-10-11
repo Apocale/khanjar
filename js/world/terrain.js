@@ -175,12 +175,16 @@ void main(){
     night += moon * pow(max(dot(Nf, normalize(uMoonDir + V)), 0.), 48.) * .11 * (1. - smoothstep(22., 55., dist));
     float mask = smoothstep(.06, .3, vL.y) * (.4 + .6 * smoothstep(.25, .65, vnoise(vW.xz * .12 + 3.)));
     mask = max(mask, smoothstep(4., 1.2, pr) * .9) * (1. - .97 * scrim);
+    // the strike: a ring runs out from the foot of the stone and lights the cracks as it passes
+    float sw = uShock.y > .001 ? exp(-pow((pr - uShock.x) / (.28 + uShock.x * .05), 2.)) * uShock.y * smoothstep(42., 14., dist) : 0.;
+    mask = max(mask, min(1., sw) * .9 * (1. - scrim));
+    night += vec3(1., .4, .12) * sw * .05;
     if (mask > .01){
       vec2 cp = vW.xz * .62 + (vec2(vnoise(vW.xz * .6), vnoise(vW.xz * .6 + 9.)) - .5) * .9;
       float edge = cracks(cp), fw = fwW * .37;
       float near = smoothstep(95., 25., dist);
       float flow = .5 + .5 * vnoise(vW.xz * .45 + vec2(uTime * .11, -uTime * .07));
-      float lava = mask * (.4 + .8 * flow) * pulse * (1. + uHeat * .9);
+      float lava = mask * (.4 + .8 * flow) * pulse * (1. + uHeat * .9 + sw * 4.5);
       float core = 1. - smoothstep(0., .016 + fw, edge), crack = 1. - smoothstep(0., .05 + fw, edge);
       night += (vec3(1., .55, .16) * core * 2. * near + vec3(1., .1, .03) * crack * 1.1 * near + vec3(.5, .04, .01) * exp(-edge * 22.) * .3) * lava;
       night += vec3(1., .26, .07) * lava * exp(-edge * 6.5) * (.2 + .8 * (1. - Nf.y)) * .3;      // the faces next to the cracks
@@ -189,11 +193,7 @@ void main(){
     vec2 lp = vW.xz - uRock.xz, cs = vec2(cos(uFoot.z), sin(uFoot.z)); lp = vec2(lp.x * cs.x - lp.y * cs.y, lp.x * cs.y + lp.y * cs.x);
     float ring = length(lp / uFoot.xy);
     night += vec3(1., .36, .08) * exp(-pow((ring - 1.08) / .18, 2.)) * (.8 + .4 * pulse) * (1. + uHeat) * 1.4;
-    // the strike: a ring of light runs out through the cracks from the foot of the stone
-    if (uShock.y > .001){
-      float sw = exp(-pow((pr - uShock.x) / (.35 + uShock.x * .08), 2.)) * uShock.y;
-      night += vec3(1., .42, .12) * sw * (.25 + 1.6 * mask) * smoothstep(40., 12., dist);
-    }
+
     vec3 toFire = normalize(uRock + vec3(0., -1.4, 1.6) - vW);
     night += alb * vec3(1., .22, .07) * 22. * exp(-pr * .6) * (.3 + .7 * max(dot(Nf, toFire), 0.)) * (1. + uHeat * .8) * (1. - .6 * scrim);
     night *= 1. - .35 * scrim;

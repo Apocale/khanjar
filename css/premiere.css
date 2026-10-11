@@ -85,7 +85,7 @@
 .prw .ic{flex:0 0 16px;width:16px;height:16px}
 .prw b{min-width:0;font-weight:400;overflow:hidden;text-overflow:ellipsis}
 .pp[data-layout="stage"] .pj-frame{--cols:26px minmax(0,1fr) 104px}
-.pp[data-layout="stage"] .pj .c3,.pp[data-layout="stage"] .pj .c4{display:none}
+.pp[data-layout="stage"] .pp-pj .c3,.pp[data-layout="stage"] .pp-pj .c4{display:none}
 
 /* Effects panel (the old way): search field, the Accelerated / 32-bit / YUV filters, the bins */
 .efx-top{display:flex;align-items:center;gap:9px;padding:6px 10px 8px;flex:0 0 auto}

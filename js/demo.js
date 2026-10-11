@@ -191,8 +191,9 @@
       if (mod && !e.altKey && k === 'j') {
         e.preventDefault();
         if (e.shiftKey) { if (!inView()) return; takeOver(); a.keys(['⌘', '⇧', 'J'], 600); a.addAdjustment(); return; }
-        var hero = $('#top'), hr = hero && hero.getBoundingClientRect();
-        if (hr && hr.bottom > innerHeight * .4 && window.KhanjarWorld && !user) {
+        // on the night (the hero or the last screen), the dagger strikes first, then the page cuts to the demo
+        var night = [$('#top'), $('.final')].some(function (el) { if (!el) return false; var r = el.getBoundingClientRect(); return r.top < innerHeight * .6 && r.bottom > innerHeight * .4; });
+        if (night && window.KhanjarWorld && !reduce) {
           heroKeys();
           window.KhanjarWorld.strike().then(function () { setTimeout(function () { open(false); }, 220); });
         } else open(true);

@@ -223,6 +223,7 @@ function start() {
   // ---- the loop: only while one of the two sections is seen ----
   let raf = 0, last = 0, slow = 0;
   const visible = new Map();
+  let finalStruck = false;
   const loop = now => {
     raf = 0;
     if (dead || document.hidden || !host) return;
@@ -243,9 +244,15 @@ function start() {
     if (!host) return;
     host.appendChild(canvas);
     layout(); wake();
+
   }
   const io = new IntersectionObserver(es => { es.forEach(e => visible.set(e.target, e.isIntersecting)); pickHost(); }, { rootMargin: '80px 0px' });
   hosts.forEach(h => io.observe(h));
+  // reaching the last screen ("Press ⌘J. Keep cutting."), the dagger strikes once
+  const fin = hosts.find(h => h.dataset.world === 'final');
+  if (fin && !reduce) new IntersectionObserver(es => {
+    if (es[0].isIntersecting && !finalStruck && host === fin) { finalStruck = true; setTimeout(() => doStrike(0), 350); }
+  }, { threshold: .6 }).observe(fin);
   document.addEventListener('visibilitychange', wake);
   let rt = 0;
   addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(layout, 80); });
