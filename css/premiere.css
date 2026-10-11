@@ -84,8 +84,10 @@
 .prw>.nm{display:flex;align-items:center;gap:5px;padding-left:20px}
 .prw .ic{flex:0 0 16px;width:16px;height:16px}
 .prw b{min-width:0;font-weight:400;overflow:hidden;text-overflow:ellipsis}
-.pp[data-layout="stage"] .pj-frame{--cols:26px minmax(0,1fr) 84px 104px}
-.pp[data-layout="stage"] .pj-frame .c4{display:none}
+/* narrower layouts keep every row on one line: Label, Name, Frame Rate, Media Duration (Media Start goes) */
+.pp[data-layout="stage"] .pj-frame,.pp[data-layout="port"] .pj-frame{--cols:26px minmax(0,1fr) 84px 104px}
+.pp[data-layout="stage"] .pj-frame .c4,.pp[data-layout="port"] .pj-frame .c4{display:none}
+.pj-head>span,.prw>span{white-space:nowrap}
 
 /* Effects panel (the old way): search field, the Accelerated / 32-bit / YUV filters, the bins */
 .efx-top{display:flex;align-items:center;gap:9px;padding:6px 10px 8px;flex:0 0 auto}
