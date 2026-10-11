@@ -1,0 +1,32 @@
+# Khanjar
+
+> Khanjar is a free, open-source command palette for Adobe Premiere Pro on macOS. In Premiere, press ⌘J, type a few letters of any video effect or effect preset, press Enter: it is applied to every selected clip. It also gives any preset its own keyboard shortcut, opens on the user's most used presets (⌘1 to ⌘0), and adds an adjustment layer at the playhead (⌘⇧J).
+
+- Price and license: free, GPL-3.0. Beta. Not affiliated with Adobe.
+- Platform: macOS 13 or later on Apple Silicon (M1 or later). No Windows, no Intel Macs.
+- Premiere Pro: 2026 (26.x) or later, tested on 26.5. Needs the Creative Cloud desktop app, which installs the companion plugin.
+- Interface: English and French.
+- Privacy: runs entirely on the Mac; only optional update checks use the internet.
+- Made by Isma, a video editor, with Claude Code (AI).
+
+## Install and use
+
+- [Download the latest release](https://github.com/Apocale/khanjar/releases/latest): `Khanjar-<version>.zip`, a menu bar app.
+- [Installation guide](https://github.com/Apocale/khanjar/blob/main/docs/INSTALL.md): manual steps, plus a prompt that lets Claude Code do the install.
+- [Guide d'installation en français](https://github.com/Apocale/khanjar/blob/main/docs/INSTALL.fr.md)
+- [Website](https://apocale.github.io/khanjar/)
+
+## What it does
+
+- Searches all video effects, the user's own presets (including purchased preset packs and presets saved in a Premiere set to another language) and Adobe's presets, with fuzzy matching ("tds" finds True Drop Shadow).
+- Applies to many clips at once. Undo: one ⌘Z for an effect, two or three for a preset, not one per clip.
+- Keeps animated presets' timing (keyframe anchoring like Premiere) and rebuilds eased curves frame by frame.
+- Learns what the user applies and lists it first; two presets always chained on the same clip become one "duo".
+- Limits: presets with masks or with Lumetri curves, color wheels or LUTs are left out; it cannot create an adjustment layer (it reuses one); no audio effects or transitions yet.
+
+## How it is built
+
+- [README](https://github.com/Apocale/khanjar/blob/main/README.md)
+- [Architecture](https://github.com/Apocale/khanjar/blob/main/docs/ARCHITECTURE.md): a native Swift menu bar app and a headless UXP plugin inside Premiere, talking over a local WebSocket.
+- [Protocol](https://github.com/Apocale/khanjar/blob/main/docs/PROTOCOL.md)
+- [Developer notes, in French](https://github.com/Apocale/khanjar/blob/main/AGENTS.md): findings about Premiere's UXP API (transactions, keyframes, .prfpset format).

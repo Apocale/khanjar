@@ -11,6 +11,7 @@ Thanks for helping. A few rules keep the project reliable:
 4. **Interface text goes through `L("…")`**, with the English text as key and the French
    translation in `helper/Resources/fr.lproj/Localizable.strings`. `scripts/check-l10n.py`
    fails the build when a translation is missing.
-5. Run `./.build/debug/khanjar selftest` before opening a pull request.
+5. Run the self-test before opening a pull request: `./scripts/fetch-sparkle.sh` once, then
+   `cd helper && swift build && ./.build/debug/khanjar selftest`.
 
 By contributing, you agree that your contribution is licensed under the GPL-3.0.

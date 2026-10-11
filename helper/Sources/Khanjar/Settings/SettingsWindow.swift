@@ -138,9 +138,19 @@ final class SettingsWindowController: NSObject {
             l.alignment = .right
             return l
         }
+        // 2026-10-09 (audit A4#4) : la raison d'un refus s'affiche SOUS le bouton, sur
+        // 2 lignes ; dans le bouton (colonne de 180 pt), le message était coupé.
+        func recorderCell(_ recorder: ShortcutRecorder) -> NSView {
+            recorder.messageLabel.preferredMaxLayoutWidth = 180
+            let cell = NSStackView(views: [recorder, recorder.messageLabel])
+            cell.orientation = .vertical
+            cell.alignment = .leading
+            cell.spacing = 4
+            return cell
+        }
         let grid = NSGridView(views: [
-            [label(L("Palette shortcut:")), shortcutRecorder],
-            [label(L("Adjustment layer shortcut:")), adjustmentRecorder],
+            [label(L("Palette shortcut:")), recorderCell(shortcutRecorder)],
+            [label(L("Adjustment layer shortcut:")), recorderCell(adjustmentRecorder)],
             [label(L("Number of results:")), resultsPopup],
             [label(L("Theme:")), themePopup],
             [adaptCheckbox, NSGridCell.emptyContentView],
@@ -151,6 +161,8 @@ final class SettingsWindowController: NSObject {
         grid.rowSpacing = 10
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).width = 180
+        // Étiquette alignée sur le texte du bouton, même quand un message s'affiche dessous.
+        for row in 0..<2 { grid.row(at: row).rowAlignment = .firstBaseline }
         // Les cases tiennent sur toute la largeur : dans la colonne de droite (180 pt),
         // « Adapt presets to the clip's framing » était coupé (vu sur le rendu du README).
         for checkbox in [adaptCheckbox, crashCheckbox] {
@@ -257,16 +269,31 @@ final class SettingsWindowController: NSObject {
 
     /// Retourne le nom de l'action déjà liée à cette combinaison, ou nil si libre.
     /// (Garde-fou : palette, calque d'effets, autres raccourcis presets.)
+    /// 2026-10-09 (audit A4#7) : on ne comparait qu'aux valeurs ENREGISTRÉES — une
+    /// palette passée à ⌘K dans l'enregistreur sans cliquer Enregistrer, puis un preset
+    /// sur ⌘K, ne voyaient aucun conflit ; et le texte « la palette (⌘J) » était figé.
+    /// Deux inscriptions identiques : Carbon refuse la 2ᵉ, et c'est l'ordre d'armement
+    /// qui décidait si ⌘K ouvrait la palette ou appliquait le preset.
     private func conflict(for shortcut: String) -> String? {
-        guard let target = SettingsStore.parseShortcut(shortcut) else { return nil }
         let s = store.current
-        func same(_ other: String?) -> Bool {
-            guard let other, let p = SettingsStore.parseShortcut(other) else { return false }
+        return Self.conflict(for: shortcut,
+                             palette: [s.shortcut, shortcutRecorder.shortcut].compactMap { $0 },
+                             adjustment: [s.adjustmentShortcut, adjustmentRecorder.shortcut].compactMap { $0 },
+                             presets: draftShortcuts)
+    }
+
+    /// Version sans fenêtre (selftest) : `palette` et `adjustment` = valeurs enregistrées
+    /// ET en cours d'édition.
+    static func conflict(for shortcut: String, palette: [String], adjustment: [String],
+                         presets: [PresetShortcut]) -> String? {
+        guard let target = SettingsStore.parseShortcut(shortcut) else { return nil }
+        func same(_ other: String) -> Bool {
+            guard let p = SettingsStore.parseShortcut(other) else { return false }
             return p == target
         }
-        if same(s.shortcut) { return L("the palette (⌘J)") }
-        if same(s.adjustmentShortcut) { return L("the adjustment layer") }
-        if let dup = draftShortcuts.first(where: { same($0.shortcut) }) { return LF("“%@”", dup.title) }
+        if let used = palette.first(where: same) { return LF("the palette (%@)", SettingsStore.pretty(used)) }
+        if adjustment.contains(where: same) { return L("the adjustment layer") }
+        if let dup = presets.first(where: { same($0.shortcut) }) { return LF("“%@”", dup.title) }
         return nil
     }
 
@@ -290,6 +317,16 @@ final class SettingsWindowController: NSObject {
             let alert = NSAlert()
             alert.messageText = L("Two identical shortcuts")
             alert.informativeText = LF("The palette and the adjustment layer both use %@. Choose two different combinations.", SettingsStore.pretty(shortcut))
+            if let window { alert.beginSheetModal(for: window) }
+            return
+        }
+        // 2026-10-09 (audit A4#7) : la palette ou le calque ne peut pas reprendre la
+        // combinaison d'un raccourci preset (avant : aucune alerte, puis l'un des deux au hasard).
+        for combo in [shortcut, adjustment] {
+            guard let taken = Self.conflict(for: combo, palette: [], adjustment: [], presets: draftShortcuts) else { continue }
+            let alert = NSAlert()
+            alert.messageText = L("Shortcut already in use")
+            alert.informativeText = LF("%@ is already assigned to %@. Choose another combination.", SettingsStore.pretty(combo), taken)
             if let window { alert.beginSheetModal(for: window) }
             return
         }

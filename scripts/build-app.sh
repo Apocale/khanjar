@@ -9,7 +9,7 @@ APP="$ROOT/dist/Khanjar.app"
 PLUGIN_VERSION=$(python3 -c "import json;print(json.load(open('$ROOT/plugin/manifest.json'))['version'])")
 # Version de l'APP native — découplée du plugin (le plugin ne change pas à
 # chaque évolution de l'UI/app ; éviter un réinstall inutile du ccx).
-APP_VERSION="0.8.3"
+APP_VERSION="0.8.4"
 
 # 0. Traductions : chaque texte L("…") du code doit avoir sa version française.
 python3 "$ROOT/scripts/check-l10n.py"
@@ -39,6 +39,13 @@ cp "$ROOT/plugin/dist/khanjar-executor.ccx" "$APP/Contents/Resources/"
 ditto "$ROOT/helper/Vendor/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 # Langues de l'interface : anglais par défaut, français si le Mac est en français.
 cp -R "$ROOT/helper/Resources/en.lproj" "$ROOT/helper/Resources/fr.lproj" "$APP/Contents/Resources/"
+# Licences livrées AVEC l'app (audit du 2026-10-08, A5#16) : Sparkle (MIT) exige
+# que sa mention accompagne chaque copie, et la GPL-3.0 de Khanjar une copie de la
+# licence. Avant codesign : la signature scelle tout Contents/Resources.
+[[ -f "$ROOT/helper/Vendor/Sparkle-LICENSE" && -f "$ROOT/public/LICENSE" ]] || {
+  echo "Licence manquante : helper/Vendor/Sparkle-LICENSE (scripts/fetch-sparkle.sh) ou public/LICENSE" >&2; exit 1; }
+cp "$ROOT/helper/Vendor/Sparkle-LICENSE" "$APP/Contents/Resources/Sparkle-LICENSE"
+cp "$ROOT/public/LICENSE" "$APP/Contents/Resources/LICENSE"
 
 # Rapports de plantage : adresse d'envoi (DSN Sentry) lue sur la machine qui
 # construit, JAMAIS commitée (dépôt public). Sans elle, la case n'est pas proposée.
@@ -72,6 +79,9 @@ else
   echo "Mises à jour : désactivées (pas de dépôt ou de clé — voir scripts/release.sh)"
 fi
 
+# LSMinimumSystemVersion 13.0 (décision du 2026-10-08, Q7) : seul macOS 26 est testé et le
+# démarrage automatique (SMAppService) exige macOS 13 ; l'appcast reprend cette valeur
+# (release.sh). Le binaire, lui, vise encore macOS 12 (helper/Package.swift).
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,7 +96,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundleShortVersionString</key><string>$APP_VERSION</string>
 	<key>CFBundleVersion</key><string>$APP_VERSION</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>LSMinimumSystemVersion</key><string>12.0</string>
+	<key>LSMinimumSystemVersion</key><string>13.0</string>
 	<key>LSUIElement</key><true/>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>KhanjarPluginVersion</key><string>$PLUGIN_VERSION</string>

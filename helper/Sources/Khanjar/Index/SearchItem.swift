@@ -3,7 +3,9 @@ import Foundation
 /// Item de l'index de recherche (docs/ARCHITECTURE.md §5.1).
 /// Codable : sérialisé tel quel dans le snapshot disque.
 struct SearchItem: Codable {
-    let id: String            // stable : "effect:<matchName>" | "preset:<uid>"
+    /// Stable : "effect:<matchName>" | "preset:<PresetUID>" | "preset:h:<16 hex>" (preset
+    /// perso sans UID, empreinte du contenu) | "preset:adobe:<UID ou h:…>" (bundle Adobe).
+    let id: String
     let kind: String          // "effect" | "preset"
     let title: String         // nom affiché (localisé)
     let subtitle: String      // "Effet vidéo" | "Preset · <dossier>" | "Preset Adobe · <dossier>"
@@ -11,9 +13,27 @@ struct SearchItem: Codable {
     let plan: ApplyPlan
     /// "full" | "effects-only" (params rejoués en M4) — précurseur du badge UI
     let fidelityHint: String
+    /// Duo : les titres des deux presets, dans l'ordre d'application (affichés en
+    /// deux étiquettes reliées par une flèche dans la palette).
+    var parts: [String]? = nil
 }
 
 extension SearchItem {
+    /// Préfixe des ids des presets du bundle Adobe (2026-10-09, audit A3#2) : avant, perso
+    /// et Adobe partageaient « preset:obj:<n> » — un preset perso au même numéro qu'un PiP
+    /// Adobe passait devant lui dans la table des ids (Tech Wampus obj:102 = « PiP 25% LL »).
+    static let adobePresetPrefix = "preset:adobe:"
+
+    /// Preset de l'UTILISATEUR : ni effet, ni duo, ni preset Adobe du bundle (contrat C-08 :
+    /// le garde-fou « plus aucun preset » ne doit pas compter les 38 PiP Adobe).
+    var isUserPreset: Bool { kind == "preset" && !id.hasPrefix(Self.adobePresetPrefix) }
+
+    /// Titre comparable (contrats C-04, I-02) : minuscules, bords rognés, suites
+    /// d'espaces (insécables comprises) repliées en une seule.
+    static func normalizedTitle(_ s: String) -> String {
+        s.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     /// Préfixe des items synthétiques « duo » (jamais dans l'index sur disque).
     static let comboPrefix = "combo:"
     var isCombo: Bool { id.hasPrefix(Self.comboPrefix) }
@@ -54,7 +74,10 @@ extension SearchItem {
 
         let a = first.title.trimmingCharacters(in: .whitespaces)
         let b = second.title.trimmingCharacters(in: .whitespaces)
-        let title = LF("%@ then %@", a, b)
+        // « → » plutôt que « then » ou « + » : le « + » est déjà dans des noms de
+        // presets (« Edge + 2 drop shadow ») et « then » se perdait (retour d'Isma,
+        // capture du 2026-10-07).
+        let title = "\(a) → \(b)"
         var keywords = first.keywords + second.keywords + [a, b]
         keywords.append("duo")
         let partial = PaletteWindowController.partialNote(first.fidelityHint) != nil
@@ -67,7 +90,8 @@ extension SearchItem {
             keywords: keywords,
             plan: ApplyPlan(label: title, operations: operations,
                             existingOperations: first.plan.existingOperations + second.plan.existingOperations),
-            fidelityHint: partial ? "dropped:1" : "full"
+            fidelityHint: partial ? "dropped:1" : "full",
+            parts: [a, b]
         )
     }
 }
@@ -179,5 +203,9 @@ struct IndexSnapshot: Codable {
     let premiereVersion: String
     let items: [SearchItem]
 
-    static let currentVersion = 6 // v6 : ease temporelle des keyframes (vel/inf par côté)
+    /// v6 : ease temporelle des keyframes (vel/inf par côté).
+    /// v7 (2026-10-09, audit A3#2) : nouveaux ids de presets (« h: » sans UID, « adobe: »
+    /// pour le bundle, favoris fusionnés). Un snapshot v6 est ignoré : la palette attend
+    /// la reconstruction du 1ᵉʳ hello (2 à 7 s) plutôt que de montrer des ids périmés.
+    static let currentVersion = 7
 }

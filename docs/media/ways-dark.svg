@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" width="960" height="360" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
+  <title>The mouse way, or ⌘J</title>
+  <desc>Applying a preset in Premiere with the mouse takes four steps in the Effects panel. With Khanjar: Command J, two or three letters, Enter. The most used items need a single shortcut, Command 1 to Command 0.</desc>
+  <rect width="960" height="360" rx="16" fill="#0b0b0c"/>
+  <rect x="0.5" y="0.5" width="959" height="359" rx="16" fill="none" stroke="#2a2a2d"/>
+  <text x="40" y="66" font-size="16" font-weight="650" fill="#ecebe8" text-anchor="start">In Premiere, with the mouse</text>
+  <rect x="300" y="44" width="107" height="32" rx="16" fill="#1d1d1d" stroke="#3a3a3e"/>
+  <text x="353.6" y="65" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Open Effects</text>
+  <path d="M415.2 60 H435.2" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M434.2 55.5 L441.2 60 L434.2 64.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="449.2" y="44" width="62" height="32" rx="16" fill="#1d1d1d" stroke="#3a3a3e"/>
+  <text x="480.0" y="65" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Search</text>
+  <path d="M518.8 60 H538.8" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M537.8 55.5 L544.8 60 L537.8 64.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="552.8" y="44" width="130" height="32" rx="16" fill="#1d1d1d" stroke="#3a3a3e"/>
+  <text x="617.8" y="65" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Open the folder</text>
+  <path d="M690.8 60 H710.8" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M709.8 55.5 L716.8 60 L709.8 64.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="724.8" y="44" width="130" height="32" rx="16" fill="#1d1d1d" stroke="#3a3a3e"/>
+  <text x="789.8" y="65" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Drag onto clips</text>
+  <text x="300" y="102" font-size="13.5" font-weight="400" fill="#a19f9a" text-anchor="start">The Effects panel has to be on screen, and you aim with the mouse.</text>
+  <path d="M40 136 H920" stroke="#2a2a2d"/>
+  <text x="40" y="174" font-size="16" font-weight="650" fill="#ecebe8" text-anchor="start">With Khanjar</text>
+  <rect x="300" y="154" width="46" height="28" rx="6" fill="#2a2a2d" stroke="#3a3a3e"/>
+  <text x="323.0" y="173" font-size="14" font-weight="600" fill="#ecebe8" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">⌘J</text>
+  <path d="M354 168 H374" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M373 163.5 L380 168 L373 172.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="388" y="152" width="160" height="32" rx="16" fill="#1d1d1d" stroke="#3a3a3e"/>
+  <text x="468.2" y="173" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Type 2 or 3 letters</text>
+  <path d="M556.4 168 H576.4" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M575.4 163.5 L582.4 168 L575.4 172.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="590.4" y="152" width="54" height="32" rx="16" fill="#3a1710" stroke="#ff4d2e"/>
+  <text x="617.4" y="173" font-size="13.5" font-weight="500" fill="#ecebe8" text-anchor="middle">Enter</text>
+  <text x="300" y="210" font-size="13.5" font-weight="400" fill="#a19f9a" text-anchor="start">From anywhere in Premiere. Initials work: “tds” finds True Drop Shadow.</text>
+  <path d="M40 244 H920" stroke="#2a2a2d"/>
+  <text x="40" y="282" font-size="16" font-weight="650" fill="#ecebe8" text-anchor="start">Your most used</text>
+  <rect x="300" y="262" width="46" height="28" rx="6" fill="#2a2a2d" stroke="#3a3a3e"/>
+  <text x="323.0" y="281" font-size="14" font-weight="600" fill="#ecebe8" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">⌘J</text>
+  <path d="M354 276 H374" stroke="#6f6d69" stroke-width="1.6"/>
+  <path d="M373 271.5 L380 276 L373 280.5" fill="none" stroke="#6f6d69" stroke-width="1.6"/>
+  <rect x="388" y="262" width="46" height="28" rx="6" fill="#2a2a2d" stroke="#3a3a3e"/>
+  <text x="411.0" y="281" font-size="14" font-weight="600" fill="#ecebe8" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">⌘1</text>
+  <text x="300" y="318" font-size="13.5" font-weight="400" fill="#a19f9a" text-anchor="start">No typing: ⌘1 to ⌘0 in the palette. Or give a preset its own shortcut, no palette at all.</text>
+</svg>

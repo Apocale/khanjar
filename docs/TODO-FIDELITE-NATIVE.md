@@ -101,26 +101,38 @@ Rangés du plus visible au plus marginal. Chaque item est **Quoi / Où / Comment
 - **Comment vérifier** : `dagger-helper index-presets` (compte des `trulyMissing`) puis
   `dagger-helper apply-dump <média> "<preset animant Vector Motion>"`.
 
-### 5. Keyframes de COULEUR silencieusement perdus
+### 5. Keyframes de COULEUR envoyés comme un nombre (valeur fausse, sans avertissement)
 
-- **Quoi** : `parseKeyframes` renvoie `nil` pour toute valeur qui n'est ni numérique ni un point
-  `"x:y"` → les animations de couleur keyframées sont **supprimées sans avertissement**. (Les
-  valeurs de couleur *statiques* sont, elles, gérées via `decodePackedColor`.)
-- **Où** : `PrfpsetParser.swift` l.192 (`return nil // couleur/valeur non gérée en keyframe pour
-  l'instant`). Lié à P1.3 (élargir `parseKeyframes`).
-- **Comment vérifier** : `dagger-helper index-presets` sur un preset à couleur animée, puis
-  `dagger-helper apply-dump`.
+- **Quoi** (corrigé par l'audit du 2026-10-08, A1#13 : ils ne sont PAS « supprimés ») : la valeur
+  d'un keyframe de couleur est l'entier 64 bits empaqueté, que `Double(…)` accepte
+  (`Double("18374686479671623680")` réussit). Le parseur en fait donc un keyframe NUMÉRIQUE, et le
+  plugin le passe tel quel à `createKeyframe` sur un paramètre couleur (`toNativeValue` ne convertit
+  que `{x,y}` et `{r,g,b,a}`) → couleur fausse, rien au journal. Le `return nil` de `parseKeyframes`
+  ne concerne que les valeurs ni numériques ni « x:y ». (Les couleurs *statiques* passent, elles, par
+  `decodePackedColor`.) 0 cas dans les bibliothèques relevées.
+- **Où** : `PrfpsetParser.swift` l.232 (`if let v = Double(rawVal)`) ; `apply.js` `toNativeValue`
+  (l.173-187).
+- **Décidé** (I-09) : réglage couleur (controlType 5) animé → non compilé (badge « partiel ») au lieu
+  d'envoyer l'entier. Un vrai rejeu demanderait de décoder chaque keyframe comme `decodePackedColor`.
+- **Comment vérifier** : `khanjar plan-dump "<preset à couleur animée>"` (HOME jetable), puis
+  `khanjar apply-dump`.
 
 ### 6. Ancrage temporel — cas limites, dégrader avec AVERTISSEMENT plutôt qu'en silence
 
-- **Quoi** : `keyframeTicks` (`apply.js` lignes 113-123) gère les 3 types d'ancre, mais :
-  - Type 2 (Sortie) clampe via `Math.max` (l.120) → un clip plus court que le preset empile les
-    keyframes sur l'in-point ;
-  - `srcDur == 0` ou `durTicks == 0` → dégradation **SILENCIEUSE** en Type 1 (l.116, l.119, l.122) ;
-  - `timeCtx` illisible → repli `{inTicks:0, durTicks:0}` (posé en l.264/l.330, catch l.272/l.337).
-  Décision : émettre un détail de fidélité (avertissement) au lieu de dégrader en silence.
-- **Où** : `apply.js` `keyframeTicks` (113-123) ; contexte temporel dans `applyParamsPostInsert`
-  (l.264-272) et `applyExistingOps` (l.330-337).
+- **Quoi** : `keyframeTicks` (`apply.js` l.297-306 à 3fede64) gère les 3 types d'ancre, mais :
+  - Type 2 (Sortie) clampe via `Math.max` (l.304) → un clip plus court que le preset empile les
+    keyframes sur l'in-point (« TR - Flicker Out » sur 0,3 s démarre faux, audit A1#9) — contraire à
+    AGENTS §3.2 item 0ter (offsets signés, jamais clampés) ;
+  - offset négatif sur un rush à in-point 0 → temps avant le début du média (peut-être refusé) ;
+  - `srcDur == 0` ou `durTicks == 0` → dégradation **SILENCIEUSE** en Type 1 ;
+  - `timeCtx` illisible → repli `{inTicks:0, durTicks:0}` (l.495 et l.561) : sur un sous-titre
+    (in-point à 1 h), keyframes 1 h trop tôt.
+  Décidé par l'audit du 2026-10-08 : P-10 retire le `Math.max` et remplace les keyframes situés avant
+  l'in-point par UN keyframe à l'in-point portant la valeur de la courbe à cet instant ; P-06 ne pose
+  plus les réglages ANIMÉS d'un clip dont l'in-point est illisible (`IN_POINT_UNREADABLE`).
+  Reste : avertir au lieu de dégrader en silence quand `srcDur` ou `durTicks` vaut 0.
+- **Où** : `apply.js` `keyframeTicks` ; contexte temporel dans `applyParamsPostInsert` (l.495-503) et
+  `applyExistingOps` (l.561-568).
 - **Comment vérifier** : `dagger-helper anchor-test "<preset>"` (échantillonne à 2/50/98 % de la
   durée du clip) sur un clip plus court que la source du preset.
 

@@ -92,7 +92,7 @@ enum Scorer {
 
     /// Tri : score décroissant puis titre alphabétique. Seuil anti-bruit.
     static func rank(query: String, prepared: [PreparedItem], limit: Int) -> [(item: SearchItem, score: Double)] {
-        let queryFolded = Array(fold(query))
+        let queryFolded = Array(foldQuery(query))
         guard !queryFolded.isEmpty else { return [] }
         let scored = prepared.compactMap { p -> (SearchItem, Double)? in
             let s = score(queryFolded: queryFolded, prepared: p)
@@ -106,11 +106,11 @@ enum Scorer {
     // MARK: - API de commodité (tests, appels ponctuels)
 
     static func score(query: String, candidate: String) -> Double {
-        score(queryFolded: Array(fold(query)), candidate: Candidate(candidate))
+        score(queryFolded: Array(foldQuery(query)), candidate: Candidate(candidate))
     }
 
     static func score(query: String, item: SearchItem) -> Double {
-        score(queryFolded: Array(fold(query)), prepared: prepare([item])[0])
+        score(queryFolded: Array(foldQuery(query)), prepared: prepare([item])[0])
     }
 
     static func rank(query: String, items: [SearchItem], limit: Int) -> [(item: SearchItem, score: Double)] {
@@ -189,8 +189,43 @@ enum Scorer {
     }
 
     /// Minuscules + suppression des diacritiques.
+    ///
+    /// 2026-10-09 (audit A3#6, B2#5) — en plus, caractère pour caractère (la longueur ne
+    /// change pas, les bonus de casse restent alignés sur le titre d'origine) :
+    ///  - espaces insécables U+00A0, U+202F, U+2007 → espace : 8 effets d'un Premiere
+    ///    français (« Noir & blanc », « Rotation 3D »…) étaient introuvables ;
+    ///  - apostrophes ’ ´ ʼ → ' ;
+    ///  - « - _ / . » → espace : « slide-up » et « slide_up » ne trouvaient rien ;
+    ///  - marques combinantes (catégorie Mn) retirées APRÈS le pliage : les voyelles
+    ///    arabes (harakat) restaient, « انزلاق » ne trouvait pas « انْزِلاقٌ ».
     static func fold(_ s: String) -> String {
-        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
             .lowercased()
+        var scalars = String.UnicodeScalarView()
+        for scalar in folded.unicodeScalars {
+            switch scalar.value {
+            case 0x00A0, 0x202F, 0x2007, 0x2D, 0x5F, 0x2F, 0x2E: scalars.append(" ")
+            case 0x2019, 0x00B4, 0x02BC: scalars.append("'")
+            default:
+                if scalar.properties.generalCategory == .nonspacingMark { continue }
+                scalars.append(scalar)
+            }
+        }
+        return String(scalars)
+    }
+
+    /// Requête tapée : même pliage, puis suites d'espaces repliées en une seule
+    /// (2026-10-09 : « drop  shadow » avec deux espaces ne trouvait plus l'effet).
+    /// Seulement la requête : dans les titres, le repli décalerait les bonus de casse.
+    static func foldQuery(_ s: String) -> String {
+        var out = ""
+        var previousWasSpace = false
+        for character in fold(s) {
+            let isSpace = character.isWhitespace
+            if isSpace && previousWasSpace { continue }
+            out.append(isSpace ? " " : character)
+            previousWasSpace = isSpace
+        }
+        return out
     }
 }

@@ -7,7 +7,7 @@ final class PalettePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     var onCancel: (() -> Void)?
-    /// ⌘1…⌘9, ⌘0 → applique la n-ième ligne. Retourne true si consommé.
+    /// ⌘1…⌘9, ⌘0 → applique la n-ième ligne. Retourne true si une ligne a été appliquée.
     /// Le modificateur ⌘ est OBLIGATOIRE : un chiffre nu doit rester saisissable
     /// (des presets s'appellent « 01 Big », « 10 Small », « TR - Fast Zoom In 180-100 »).
     var onDigit: ((Int) -> Bool)?
@@ -16,13 +16,52 @@ final class PalettePanel: NSPanel {
         super.resignKey()
         onCancel?() // clic ailleurs = fermeture, comme Spotlight
     }
+    /// Touche PHYSIQUE → chiffre : rangée du haut (1…9, 0) puis pavé numérique.
+    static let digitKeyCodes: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9, 29: 0,
+        83: 1, 84: 2, 85: 3, 86: 4, 87: 5, 88: 6, 89: 7, 91: 8, 92: 9, 82: 0,
+    ]
+
+    /// 2026-10-09 (audit A4#2, B2#2) : ⌘1…⌘0 faisaient bip en AZERTY — donc chez
+    /// Isma (disposition ABC-AZERTY). Cause : on lisait le CARACTÈRE
+    /// (`charactersIgnoringModifiers`), qui vaut « & » pour la touche 1 en AZERTY même
+    /// avec ⌘, et on exigeait des modificateurs exactement égaux à ⌘ : Verr. Maj,
+    /// ⌘⇧ (le « 1 » d'AZERTY) et le pavé (drapeau numericPad) échouaient aussi.
+    /// Correction : décider par la touche physique (keyCode, même place en AZERTY,
+    /// QWERTZ, QWERTY…), en ignorant Verr. Maj, pavé, fn et Maj ; ⌘ reste
+    /// OBLIGATOIRE (un chiffre nu doit rester saisissable). Un ⌘n sans n-ième ligne
+    /// est consommé en silence (avant : bip). ⌘↩ (réflexe d'Alfred ou de Raycast,
+    /// bip garanti avant) valide comme Entrée.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if mods == .command, let chars = event.charactersIgnoringModifiers, chars.count == 1,
-           let digit = Int(chars), onDigit?(digit) == true {
+            .subtracting([.capsLock, .numericPad, .function])
+        if event.keyCode == 36 || event.keyCode == 76, mods == .command, let onReturn {
+            onReturn()
+            return true
+        }
+        if let digit = Self.digitKeyCodes[event.keyCode], mods.subtracting(.shift) == .command, let onDigit {
+            _ = onDigit(digit)
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+    /// Entrée qui n'est PAS passée par le champ de recherche (2026-10-08, chez un
+    /// ami d'Isma : « Entrée fait bip et n'applique rien »). Un clic sur une ligne
+    /// ou Tab donnait le focus à la liste ; la liste ne sait rien faire d'Entrée,
+    /// la touche remontait jusqu'à la fenêtre et macOS jouait son bip d'action
+    /// impossible. La fenêtre la rattrape : Retour (36) et Entrée du pavé (76,
+    /// aussi fn+Retour sur un portable).
+    /// 2026-10-09 (audit A4#12) : Verr. Maj allumé ajoute le drapeau capsLock, la
+    /// touche n'était plus reconnue et retombait sur le bip ; il est ignoré aussi.
+    var onReturn: (() -> Void)?
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.numericPad, .function, .capsLock])
+        if event.keyCode == 36 || event.keyCode == 76, mods.isEmpty, let onReturn {
+            onReturn()
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 
@@ -45,7 +84,7 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     private let field = NSTextField()
     private let table = NSTableView()
     private let scroll = NSScrollView()
-    private let emptyLabel = NSTextField(labelWithString: L("No results"))
+    private let emptyLabel = NSTextField(labelWithString: "")
     private let frequentLabel = NSTextField(labelWithString: L("Frequently used"))
     /// Une ligne affichée. `count` n'est renseigné que pour les fréquents :
     /// il déclenche l'affichage du rang ⌘n et du nombre d'applications.
@@ -54,9 +93,17 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     /// Vrai quand la liste affichée est le classement (champ vide).
     private var showingFrequent = false
 
-    private let width: CGFloat = 580
-    private let fieldHeight: CGFloat = 48
-    private let rowHeight: CGFloat = 40
+    // Style « Premiere » (direction B choisie par Isma le 2026-10-07) : dense, une
+    // ligne par item, couleurs du thème sombre d'Adobe (voir PaletteStyle).
+    private let width: CGFloat = 560
+    private let fieldHeight: CGFloat = 44
+    private let rowHeight: CGFloat = 28
+    private let footerHeight: CGFloat = 24
+    private let searchIcon = NSImageView()
+    private let fieldSeparator = FillView(color: PaletteStyle.separator)
+    private let footerSeparator = FillView(color: PaletteStyle.separator)
+    // 2026-10-09 (audit A4#16) : le pied disait « ⌘1–9 » alors que ⌘0 applique la 10ᵉ ligne.
+    private let footerLabel = NSTextField(labelWithString: L("↵ apply  ·  ⌘1–⌘0 direct  ·  esc close"))
 
     var isVisible: Bool { panel.isVisible }
 
@@ -67,6 +114,9 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         case "light": panel.appearance = NSAppearance(named: .aqua)
         default: panel.appearance = nil // suit le système
         }
+        // 2026-10-09 (audit A4#16) : le HUD suivait l'apparence du Mac, pas le thème
+        // forcé : palette sombre puis HUD clair. Il prend désormais le même thème.
+        HUD.appearance = panel.appearance
     }
 
     override init() {
@@ -75,6 +125,15 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
         super.init()
+        // ⌘A ⌘C ⌘V ⌘X ⌘Z dans le champ (2026-10-09, audit A4#5) : voir EditMenu.
+        EditMenu.installIfNeeded()
+        // m10 (relecture finale, 2026-10-11) : palette restée ouverte (validation refusée
+        // pendant une application, C-02 point 5) → le HUD se place sous elle au lieu de
+        // recouvrir le champ de recherche.
+        HUD.paletteFrame = { [weak self] in
+            guard let self, self.panel.isVisible else { return nil }
+            return self.panel.frame
+        }
 
         panel.level = .floating
         panel.isOpaque = false
@@ -90,14 +149,26 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         let background = PaletteBackgroundView()
         panel.contentView = background
 
-        // Champ de recherche
-        field.font = .systemFont(ofSize: 20, weight: .regular)
+        // Champ de recherche, précédé d'une loupe ; son texte s'aligne sur les titres.
+        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
+        searchIcon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+        searchIcon.contentTintColor = PaletteStyle.secondaryText
+        background.addSubview(searchIcon)
+        background.addSubview(fieldSeparator)
+        background.addSubview(footerSeparator)
+        footerLabel.font = .systemFont(ofSize: 10.5)
+        footerLabel.textColor = PaletteStyle.tertiaryText
+        background.addSubview(footerLabel)
+        field.font = .systemFont(ofSize: 15, weight: .regular)
+        field.textColor = PaletteStyle.primaryText
         field.placeholderString = L("Effect or preset…")
         field.isBezeled = false
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
         field.delegate = self
+        // VoiceOver (2026-10-09, audit A4#13) : le champ n'avait pas de nom.
+        field.setAccessibilityLabel(L("Search effects and presets"))
         background.addSubview(field)
 
         // Liste de résultats
@@ -110,8 +181,13 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         table.delegate = self
         table.target = self
         table.doubleAction = #selector(rowDoubleClicked)
+        table.intercellSpacing = .zero
+        // Le focus reste TOUJOURS dans le champ : un clic sur une ligne la
+        // sélectionne sans voler le clavier (sinon Entrée faisait bip, voir
+        // PalettePanel.keyDown) et la frappe continue de chercher.
+        table.refusesFirstResponder = true
         let column = NSTableColumn(identifier: .init("main"))
-        column.width = width - 24
+        column.width = width - 16
         table.addTableColumn(column)
 
         scroll.documentView = table
@@ -119,17 +195,18 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         scroll.drawsBackground = false
         background.addSubview(scroll)
 
-        emptyLabel.font = .systemFont(ofSize: 13)
-        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.font = .systemFont(ofSize: 12.5)
+        emptyLabel.textColor = PaletteStyle.secondaryText
         emptyLabel.isHidden = true
         background.addSubview(emptyLabel)
 
-        frequentLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-        frequentLabel.textColor = .tertiaryLabelColor
+        frequentLabel.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        frequentLabel.textColor = PaletteStyle.secondaryText
         frequentLabel.isHidden = true
         background.addSubview(frequentLabel)
 
         panel.onDigit = { [weak self] digit in self?.commit(digit: digit) ?? false }
+        panel.onReturn = { [weak self] in self?.commitSelection() }
 
         layout(rows: 0, noResult: false)
     }
@@ -153,6 +230,75 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
+    /// Recherche tapée au moment de la dernière validation (Entrée).
+    /// (Gardée jusqu'à ce que le coordinateur passe à `lastCommitted`, contrat §4.6.)
+    private(set) var lastCommittedQuery = ""
+
+    /// Recherche ET ligne validées en dernier (2026-10-09, audit A4#3, B4#10). La
+    /// requête seule ne suffisait pas : à la réouverture après un échec, c'était la
+    /// 1ʳᵉ ligne qui revenait en surbrillance, pas celle que le monteur avait
+    /// choisie (↓↓ puis Entrée) — un Entrée réflexe appliquait un AUTRE preset.
+    private(set) var lastCommitted: (query: String, itemId: String)?
+
+    func clearLastCommitted() {
+        lastCommitted = nil
+        lastCommittedQuery = ""
+    }
+
+    /// Validation avec refus possible (2026-10-09, audit A4#10), prioritaire sur
+    /// `onCommit`. L'app rend false quand elle refuse (une application est déjà en
+    /// cours) : la palette RESTE ouverte. Avant, elle se fermait quand même et le
+    /// choix du monteur était perdu (HUD « Application en cours »).
+    var onCommitChecked: ((SearchItem) -> Bool)?
+
+    /// Rouvre la palette avec une recherche déjà tapée (après un échec rattrapable,
+    /// ex. « Sélectionne d'abord un clip » : on ne fait pas retaper le monteur), en
+    /// remettant en surbrillance la ligne `itemId` si elle figure dans les résultats
+    /// (sinon la 1ʳᵉ, comme d'habitude).
+    func show(prefill query: String, selecting itemId: String?) {
+        show()
+        prefill(query, selecting: itemId)
+    }
+
+    /// Remplit la recherche et choisit la ligne — séparé de show() pour être
+    /// vérifié hors écran (selftest).
+    /// 2026-10-09 (audit A4#3) : le curseur n'est plus remis au bout du texte. Une
+    /// frappe s'ajoutait à l'ancienne recherche (« blur » + « glow » = « blurglow »,
+    /// « Rien trouvé ») ; le texte est désormais entièrement sélectionné : une
+    /// frappe le remplace, Entrée relance.
+    func prefill(_ query: String, selecting itemId: String?) {
+        var changed = false
+        if !query.isEmpty {
+            field.stringValue = query
+            field.currentEditor()?.selectedRange = NSRange(location: 0, length: query.utf16.count)
+            refresh(announce: false)
+            changed = true
+        }
+        if let itemId, let row = results.firstIndex(where: { $0.item.id == itemId }) {
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            table.scrollRowToVisible(row)
+            changed = true
+        }
+        if changed { announceSelection() }   // une seule annonce, pour la ligne retenue
+    }
+
+    /// Ce que VoiceOver annonce : le titre de la ligne en surbrillance, sinon le
+    /// message « Rien trouvé » (nil : rien à dire).
+    var spokenSelection: String? {
+        let row = table.selectedRow
+        if row >= 0, row < results.count { return results[row].item.title }
+        return emptyLabel.isHidden ? nil : emptyLabel.stringValue
+    }
+
+    /// 2026-10-09 (audit A4#13) : sous VoiceOver, rien n'était annoncé. Le focus
+    /// reste dans le champ (correctif 3fede64) : ↓, Tab et chaque frappe changeaient
+    /// la ligne choisie en silence, le monteur appliquait à l'aveugle. On annonce
+    /// la ligne en surbrillance à chaque changement — seulement palette affichée.
+    private func announceSelection() {
+        guard panel.isVisible, let text = spokenSelection else { return }
+        HUD.announce(text)
+    }
+
     func show() {
         isClosing = false
         // Calque activé à l'affichage (et pas à la création) : les animations pop en
@@ -160,39 +306,33 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         // sélectionnée dans les images du README (constaté le 2026-10-07).
         panel.contentView?.wantsLayer = true
         field.stringValue = ""
-        // Champ vide = classement fréquence + récence, prêt à l'emploi : la
-        // palette ne s'ouvre plus sur une liste vide qui attend une frappe.
-        refresh()
 
         if let screen = NSScreen.main {
             let frame = screen.visibleFrame
             panel.setFrameTopLeftPoint(NSPoint(x: frame.midX - width / 2,
-                                               y: frame.minY + frame.height * 0.72))
+                                               y: frame.minY + frame.height * HUD.anchorFraction))
         }
 
-        panel.alphaValue = 0
+        // Apparition instantanée, comme un panneau de Premiere (direction B).
+        // 2026-10-09 (audit A4#8) : le clavier est pris AVANT de remplir la liste.
+        // Tant que la palette n'est pas la fenêtre clé, la frappe part dans
+        // Premiere, où une lettre seule est un outil (D sélectionne le clip sous la
+        // tête de lecture, C le cutter, M un marqueur…) ; remplir la liste d'abord
+        // allongeait cette fenêtre de temps. Le haut de la palette reste fixe quand
+        // refresh() la redimensionne : la position posée ici ne bouge pas.
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
         panel.makeKey()
         panel.makeFirstResponder(field)
-
-        if let layer = panel.contentView?.layer {
-            centerAnchor(layer)
-            layer.removeAllAnimations()
-            let spring = CASpringAnimation(keyPath: "transform.scale")
-            spring.fromValue = 0.97
-            spring.toValue = 1.0
-            spring.damping = 24
-            spring.stiffness = 420
-            spring.mass = 1
-            spring.duration = spring.settlingDuration
-            layer.add(spring, forKey: "pop-in")
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-        }
+        // Champ vide = classement fréquence + récence, prêt à l'emploi : la
+        // palette ne s'ouvre plus sur une liste vide qui attend une frappe.
+        refresh()
         Logger.shared.debug("Palette affichée (key=\(panel.isKeyWindow), focusChamp=\(panel.firstResponder === field.currentEditor()))")
+        // Sans le focus clavier, la frappe et Entrée partent dans Premiere (qui
+        // bipe) : tracé en clair, c'est la première chose à lire chez un ami.
+        if !panel.isKeyWindow {
+            Logger.shared.error("Palette affichée SANS le focus clavier — la frappe va à l'app au premier plan")
+        }
     }
 
     /// Fermeture immédiate (Échap, clic ailleurs) — instantanée pour rester vive.
@@ -205,30 +345,9 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
 
     /// Fermeture avec micro-pop (validation Entrée) : léger zoom + fondu.
     private func dismissWithPop() {
-        guard panel.isVisible, !isClosing else { return }
-        isClosing = true
-        if let layer = panel.contentView?.layer {
-            centerAnchor(layer)
-            let scale = CABasicAnimation(keyPath: "transform.scale")
-            scale.fromValue = 1.0
-            scale.toValue = 1.025
-            scale.duration = 0.13
-            scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            scale.fillMode = .forwards
-            scale.isRemovedOnCompletion = false
-            layer.add(scale, forKey: "pop-out")
-        }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.13
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            guard let self else { return }
-            self.panel.orderOut(nil)
-            self.panel.alphaValue = 1
-            self.panel.contentView?.layer?.removeAllAnimations()
-            self.isClosing = false
-        })
+        // Direction B : fermeture instantanée, sans zoom ni fondu.
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
     }
 
     /// Documentation : la palette telle qu'elle s'afficherait pour `query`
@@ -255,23 +374,59 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         panel.isVisible ? hide() : show()
     }
 
+    /// Place la palette dans la partie utile de l'écran (au-dessus du Dock).
+    /// 2026-10-09 (audit A4#14, B4#11) : avec 17 à 20 résultats (réglage 1…20), la
+    /// palette, dont le haut est à 72 % de l'écran, passait sous le Dock ou hors de
+    /// l'écran sur un 13 pouces (100 + 28 pt par ligne) : dernières lignes et pied
+    /// invisibles. On remonte d'abord le haut (sans dépasser le haut utile) ; si
+    /// elle reste trop grande, on montre moins de lignes (la liste défile, ↓ et Tab
+    /// suivent la ligne choisie).
+    /// `chrome` = tout sauf les lignes ; renvoie le haut et la hauteur de liste retenus.
+    static func fit(top: CGFloat, chrome: CGFloat, listHeight: CGFloat, rowHeight: CGFloat,
+                    visible: NSRect, margin: CGFloat = 8) -> (top: CGFloat, listHeight: CGFloat) {
+        var list = listHeight
+        let room = visible.height - 2 * margin
+        if chrome + list > room, list > rowHeight {
+            let rowsThatFit = max(1, Int((room - chrome) / rowHeight))
+            list = min(list, CGFloat(rowsThatFit) * rowHeight)
+        }
+        let total = chrome + list
+        var fitted = top
+        if fitted - total < visible.minY + margin { fitted = visible.minY + margin + total }
+        fitted = min(fitted, visible.maxY - margin)
+        return (fitted, list)
+    }
+
     private func layout(rows: Int, noResult: Bool) {
-        let listHeight = noResult ? 32 : CGFloat(rows) * rowHeight
+        var listHeight: CGFloat = noResult ? 36 : CGFloat(rows) * rowHeight
         let headerVisible = showingFrequent && rows > 0
-        let headerHeight: CGFloat = headerVisible ? 18 : 0
-        let total = fieldHeight + (listHeight > 0 ? listHeight + headerHeight + 8 : 0)
-        let top = panel.frame.origin.y + panel.frame.height
+        let headerHeight: CGFloat = headerVisible ? 22 : 0
+        var top = panel.frame.origin.y + panel.frame.height
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            let chrome = fieldHeight + 1 + 1 + footerHeight + (listHeight > 0 ? headerHeight + 8 : 0)
+            (top, listHeight) = Self.fit(top: top, chrome: chrome, listHeight: listHeight,
+                                         rowHeight: rowHeight, visible: visible)
+        }
+        let listBlock = listHeight > 0 ? listHeight + headerHeight + 8 : 0
+        let total = fieldHeight + 1 + listBlock + 1 + footerHeight
         panel.setContentSize(NSSize(width: width, height: total))
         panel.setFrameTopLeftPoint(NSPoint(x: panel.frame.origin.x, y: top))
 
-        field.frame = NSRect(x: 16, y: total - fieldHeight + 12, width: width - 32, height: 26)
-        scroll.frame = NSRect(x: 8, y: 4, width: width - 16, height: max(0, listHeight))
+        // Du bas vers le haut : pied, filet, liste (+ en-tête), filet, champ.
+        footerLabel.sizeToFit()
+        footerLabel.frame.origin = NSPoint(x: 16, y: (footerHeight - footerLabel.frame.height) / 2)
+        footerSeparator.frame = NSRect(x: 0, y: footerHeight, width: width, height: 1)
+        let listBottom = footerHeight + 1 + 4
+        scroll.frame = NSRect(x: 8, y: listBottom, width: width - 16, height: max(0, listHeight))
         scroll.isHidden = noResult || rows == 0
-        frequentLabel.frame = NSRect(x: 20, y: listHeight + 5, width: width - 40, height: 13)
+        frequentLabel.frame = NSRect(x: 48, y: listBottom + listHeight + 5, width: width - 64, height: 14)
         frequentLabel.isHidden = !headerVisible
         emptyLabel.sizeToFit()
-        emptyLabel.frame.origin = NSPoint(x: 20, y: 8)
+        emptyLabel.frame.origin = NSPoint(x: 48, y: listBottom + (listHeight - emptyLabel.frame.height) / 2)
         emptyLabel.isHidden = !noResult
+        fieldSeparator.frame = NSRect(x: 0, y: total - fieldHeight - 1, width: width, height: 1)
+        searchIcon.frame = NSRect(x: 18, y: total - fieldHeight + (fieldHeight - 16) / 2, width: 16, height: 16)
+        field.frame = NSRect(x: 46, y: total - fieldHeight + (fieldHeight - 20) / 2, width: width - 62, height: 20)
     }
 
     // MARK: - Recherche
@@ -280,7 +435,7 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         refresh()
     }
 
-    private func refresh() {
+    private func refresh(announce: Bool = true) {
         let query = field.stringValue.trimmingCharacters(in: .whitespaces)
         showingFrequent = query.isEmpty
         if showingFrequent {
@@ -292,10 +447,13 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         table.reloadData()
         if !results.isEmpty {
             table.selectRowIndexes([0], byExtendingSelection: false) // meilleur résultat pré-sélectionné
+            table.scrollRowToVisible(0)   // liste raccourcie à l'écran (fit) : revenir en haut
         }
         // « Aucun résultat » ne concerne qu'une recherche : un classement vide
         // (premier lancement, aucune application encore faite) se montre nu.
+        if !query.isEmpty && results.isEmpty { emptyLabel.stringValue = LF("Nothing found for “%@”", query) }
         layout(rows: results.count, noResult: !query.isEmpty && results.isEmpty)
+        if announce { announceSelection() }
     }
 
     // MARK: - Clavier (flèches, Entrée, Échap depuis le champ)
@@ -306,8 +464,18 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
             move(1); return true
         case #selector(NSResponder.moveUp(_:)):
             move(-1); return true
-        case #selector(NSResponder.insertNewline(_:)):
+        // ⌥Entrée / ⌃Entrée : appliquent aussi, au lieu d'insérer un retour à la
+        // ligne invisible dans la recherche.
+        case #selector(NSResponder.insertNewline(_:)),
+             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+             #selector(NSResponder.insertLineBreak(_:)):
             commitSelection(); return true
+        // Tab ne sort plus du champ (il donnait le focus à la liste → Entrée
+        // faisait bip) : il parcourt les résultats, comme les flèches.
+        case #selector(NSResponder.insertTab(_:)):
+            move(1); return true
+        case #selector(NSResponder.insertBacktab(_:)):
+            move(-1); return true
         case #selector(NSResponder.cancelOperation(_:)):
             hide(); return true
         default:
@@ -320,6 +488,7 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
         let next = min(max(table.selectedRow + delta, 0), results.count - 1)
         table.selectRowIndexes([next], byExtendingSelection: false)
         table.scrollRowToVisible(next)
+        announceSelection()
     }
 
     @objc private func rowDoubleClicked() {
@@ -329,7 +498,14 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     private func commitSelection() {
         guard table.selectedRow >= 0, table.selectedRow < results.count else { return }
         let item = results[table.selectedRow].item
-        onCommit?(item)  // application déclenchée AVANT l'animation : zéro latence ajoutée
+        lastCommittedQuery = field.stringValue
+        lastCommitted = (field.stringValue, item.id)
+        // Application déclenchée AVANT la fermeture : zéro latence ajoutée.
+        if let onCommitChecked {
+            guard onCommitChecked(item) else { return }   // refusé : la palette reste ouverte
+        } else {
+            onCommit?(item)
+        }
         dismissWithPop()
     }
 
@@ -343,59 +519,33 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let entry = results[row]
-        let cell = NSTableCellView()
-
-        // Fréquents : rang ⌘n à gauche (découvrabilité du raccourci) et nombre
-        // d'applications à droite. Le texte se décale pour leur laisser la place.
-        // Réserve à droite : le badge « partiel » occupe déjà width-92…width-12
-        // sur la ligne du titre ; le compteur se place sous lui, jamais dessus.
-        let left: CGFloat = entry.count != nil ? 42 : 12
-        let textWidth = entry.count != nil ? width - left - 104 : width - 48
-
+        // Colonne de gauche FIXE dans les deux modes (audit UX : les titres sautaient
+        // de 30 pt dès la première lettre) : ⌘n pour les fréquents, « fx » ou une
+        // icône de type pour la recherche. Le compteur d'applications disparaît : il
+        // était coupé à droite et ne parlait pas la même unité sur la ligne d'un duo.
+        let glyph: PaletteCellView.Glyph
         if entry.count != nil, row < 10 {
-            let rank = NSTextField(labelWithString: "⌘\(row == 9 ? 0 : row + 1)")
-            rank.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-            rank.textColor = .tertiaryLabelColor
-            rank.frame = NSRect(x: 12, y: 13, width: 26, height: 14)
-            cell.addSubview(rank)
+            glyph = .shortcut("⌘\(row == 9 ? 0 : row + 1)")
+        } else if entry.item.isCombo {
+            glyph = .symbol("link")
+        } else if entry.item.kind == "effect" {
+            glyph = .fx
+        } else {
+            glyph = .symbol("square.stack.3d.down.right")
         }
+        return PaletteCellView(width: width - 16, height: rowHeight, glyph: glyph,
+                               title: entry.item.title, parts: entry.item.parts,
+                               detail: Self.shortDetail(entry.item.subtitle),
+                               partial: Self.partialNote(entry.item.fidelityHint))
+    }
 
-        let title = NSTextField(labelWithString: entry.item.title)
-        title.font = .systemFont(ofSize: 14, weight: .medium)
-        title.lineBreakMode = .byTruncatingTail
-        title.frame = NSRect(x: left, y: 20, width: textWidth, height: 18)
-
-        let subtitle = NSTextField(labelWithString: entry.item.subtitle)
-        subtitle.font = .systemFont(ofSize: 11)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.lineBreakMode = .byTruncatingTail
-        subtitle.frame = NSRect(x: left, y: 4, width: textWidth, height: 14)
-
-        cell.addSubview(title)
-        cell.addSubview(subtitle)
-
-        if let count = entry.count {
-            let uses = NSTextField(labelWithString: "\(count) ×")
-            uses.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-            uses.textColor = .tertiaryLabelColor
-            uses.alignment = .right
-            uses.frame = NSRect(x: width - 92, y: 4, width: 80, height: 14)
-            cell.addSubview(uses)
-        }
-
-        // Badge « partiel » : sans lui, un preset dont une partie n'a pas pu être
-        // rejouée (paramètres non supportés, effet absent de cette installation)
-        // s'applique en silence — l'utilisateur croit à un bug de son montage.
-        if let note = Self.partialNote(entry.item.fidelityHint) {
-            let badge = NSTextField(labelWithString: note)
-            badge.font = .systemFont(ofSize: 9, weight: .medium)
-            badge.textColor = .secondaryLabelColor
-            badge.alignment = .right
-            badge.toolTip = L("This preset can't be fully replayed: some settings aren't accessible to Premiere extensions.")
-            badge.frame = NSRect(x: width - 92, y: 20, width: 80, height: 16)
-            cell.addSubview(badge)
-        }
-        return cell
+    /// « Preset · grant subtitles presets/Presets » → « Preset · Presets » : seul le
+    /// dernier dossier, sinon le détail se coupait au début (« …set · grant… »).
+    static func shortDetail(_ subtitle: String) -> String {
+        guard let dot = subtitle.range(of: " · ") else { return subtitle }
+        let folder = subtitle[dot.upperBound...]
+        guard let last = folder.split(separator: "/").last, folder.contains("/") else { return subtitle }
+        return subtitle[..<dot.upperBound] + last.trimmingCharacters(in: .whitespaces)
     }
 
     /// "params:12/20,dropped:2" → "partiel" ; nil si tout est rejouable.
@@ -411,20 +561,173 @@ final class PaletteWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     }
 }
 
-/// Fond de la palette : gris uni, arrondi, qui suit l'apparence (sombre / clair).
+/// Couleurs de la palette, direction B « façon Premiere » (thème sombre d'Adobe,
+/// Spectrum) ; une variante claire suit l'apparence du Mac.
+enum PaletteStyle {
+    private static func dynamic(_ dark: NSColor, _ light: NSColor) -> NSColor {
+        NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
+    }
+    private static func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+        NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255, alpha: alpha)
+    }
+    static let background = dynamic(hex(0x1D1D1D), hex(0xF4F4F4))
+    static let border = dynamic(hex(0xFFFFFF, 0.09), hex(0x000000, 0.12))
+    static let separator = dynamic(hex(0x2C2C2C), hex(0xDDDDDD))
+    static let primaryText = dynamic(hex(0xE3E3E3), hex(0x222222))
+    static let secondaryText = dynamic(hex(0x8F8F8F), hex(0x6E6E6E))
+    static let tertiaryText = dynamic(hex(0x6E6E6E), hex(0x9A9A9A))
+    static let selection = hex(0x2680EB)
+    static let selectedText = hex(0xFFFFFF)
+    static let selectedSecondary = hex(0xFFFFFF, 0.85)
+    static let chip = dynamic(hex(0x343434), hex(0xE2E2E2))
+    static let partial = hex(0xE8A33D)
+}
+
+/// Fond plein d'une couleur (filets de séparation).
+final class FillView: NSView {
+    private let color: NSColor
+    init(color: NSColor) { self.color = color; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) non utilisé") }
+    override func draw(_ dirtyRect: NSRect) { color.setFill(); bounds.fill() }
+}
+
+/// Une ligne de résultat : glyphe à gauche, titre, badge « partiel », détail à droite.
+/// Les couleurs suivent la sélection (backgroundStyle).
+final class PaletteCellView: NSTableCellView {
+    enum Glyph { case shortcut(String), fx, symbol(String) }
+
+    private let glyphLabel = NSTextField(labelWithString: "")
+    private let glyphImage = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var partialLabel: NSTextField?
+
+    private var chips: [NSTextField] = []
+    private var arrows: [NSTextField] = []
+
+    init(width: CGFloat, height: CGFloat, glyph: Glyph, title: String, parts: [String]? = nil,
+         detail: String, partial: String?) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        let glyphRect = NSRect(x: 6, y: (height - 16) / 2, width: 30, height: 16)
+        switch glyph {
+        case .shortcut(let text):
+            glyphLabel.stringValue = text
+            glyphLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+            glyphLabel.frame = NSRect(x: 6, y: (height - 13) / 2 - 1, width: 30, height: 13)
+        case .fx:
+            glyphLabel.stringValue = "fx"
+            glyphLabel.font = NSFontManager.shared.convert(.systemFont(ofSize: 11.5, weight: .semibold), toHaveTrait: .italicFontMask)
+        case .symbol(let name):
+            glyphImage.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            glyphImage.symbolConfiguration = .init(pointSize: 11, weight: .medium)
+            glyphImage.frame = glyphRect
+            addSubview(glyphImage)
+        }
+        glyphLabel.alignment = .center
+        if glyphLabel.frame == .zero { glyphLabel.frame = glyphRect }
+        addSubview(glyphLabel)
+
+        detailLabel.stringValue = detail
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.alignment = .right
+        detailLabel.lineBreakMode = .byTruncatingHead
+        detailLabel.sizeToFit()
+        let detailWidth = min(detailLabel.frame.width, 200)
+        detailLabel.frame = NSRect(x: width - 12 - detailWidth, y: (height - 14) / 2, width: detailWidth, height: 14)
+        addSubview(detailLabel)
+
+        var titleRight = detailLabel.frame.minX - 10
+        if let partial {
+            // Badge visible (pastille ambre), plus une note grise de 9 pt.
+            let badge = NSTextField(labelWithString: partial)
+            badge.font = .systemFont(ofSize: 9.5, weight: .semibold)
+            badge.textColor = PaletteStyle.partial
+            badge.alignment = .center
+            badge.wantsLayer = true
+            badge.layer?.backgroundColor = PaletteStyle.partial.withAlphaComponent(0.15).cgColor
+            badge.layer?.cornerRadius = 4
+            badge.toolTip = L("This preset can't be fully replayed: some settings aren't accessible to Premiere extensions.")
+            badge.sizeToFit()
+            let badgeWidth = badge.frame.width + 10
+            badge.frame = NSRect(x: titleRight - badgeWidth, y: (height - 15) / 2, width: badgeWidth, height: 15)
+            addSubview(badge)
+            partialLabel = badge
+            titleRight = badge.frame.minX - 8
+        }
+
+        if let parts, parts.count == 2 {
+            // Duo : deux étiquettes reliées par une flèche — on voit d'un coup d'œil que
+            // ce sont deux presets, et dans quel ordre ils seront posés.
+            var x: CGFloat = 40
+            for (i, part) in parts.enumerated() {
+                if i > 0 {
+                    let arrow = NSTextField(labelWithString: "→")
+                    arrow.font = .systemFont(ofSize: 12, weight: .medium)
+                    arrow.sizeToFit()
+                    arrow.frame.origin = NSPoint(x: x, y: (height - arrow.frame.height) / 2)
+                    addSubview(arrow); arrows.append(arrow)
+                    x = arrow.frame.maxX + 6
+                }
+                let chip = NSTextField(labelWithString: part)
+                chip.font = .systemFont(ofSize: 12)
+                chip.lineBreakMode = .byTruncatingTail
+                chip.alignment = .center
+                chip.wantsLayer = true
+                chip.layer?.cornerRadius = 4
+                chip.sizeToFit()
+                let room = titleRight - x - (i == 0 ? 120 : 0)
+                let chipWidth = min(chip.frame.width + 14, max(50, room))
+                chip.frame = NSRect(x: x, y: (height - 18) / 2, width: chipWidth, height: 18)
+                addSubview(chip); chips.append(chip)
+                x = chip.frame.maxX + 6
+            }
+        } else {
+            titleLabel.stringValue = title
+            titleLabel.font = .systemFont(ofSize: 12.5)
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.frame = NSRect(x: 40, y: (height - 16) / 2, width: max(60, titleRight - 40), height: 16)
+            addSubview(titleLabel)
+        }
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) non utilisé") }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyColors() }
+    }
+
+    private func applyColors() {
+        let selected = backgroundStyle == .emphasized
+        titleLabel.textColor = selected ? PaletteStyle.selectedText : PaletteStyle.primaryText
+        detailLabel.textColor = selected ? PaletteStyle.selectedSecondary : PaletteStyle.secondaryText
+        glyphLabel.textColor = selected ? PaletteStyle.selectedSecondary : PaletteStyle.secondaryText
+        glyphImage.contentTintColor = selected ? PaletteStyle.selectedSecondary : PaletteStyle.secondaryText
+        for chip in chips {
+            chip.textColor = selected ? PaletteStyle.selectedText : PaletteStyle.primaryText
+            chip.layer?.backgroundColor = (selected ? NSColor.white.withAlphaComponent(0.22) : PaletteStyle.chip).cgColor
+        }
+        for arrow in arrows { arrow.textColor = selected ? PaletteStyle.selectedText : PaletteStyle.secondaryText }
+    }
+}
+
+/// Fond de la palette : couleur unie façon Premiere, filet fin, coins arrondis.
 /// Dessiné en draw(_:) (et non en propriété de calque) pour que le rendu hors écran
 /// des images du README (Snapshot) soit identique, pixel pour pixel, à l'écran.
 final class PaletteBackgroundView: NSView {
-    static let darkFill = NSColor(calibratedWhite: 0.16, alpha: 0.97)
-    static let lightFill = NSColor(calibratedWhite: 0.985, alpha: 0.97)
-    static let cornerRadius: CGFloat = 12
+    static let cornerRadius: CGFloat = 8
 
     override var isOpaque: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        (dark ? Self.darkFill : Self.lightFill).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
+        PaletteStyle.background.setFill()
+        path.fill()
+        PaletteStyle.border.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -433,15 +736,22 @@ final class PaletteBackgroundView: NSView {
     }
 }
 
-/// Ligne de la palette : la sélection est peinte ici, en bleu plein comme sur le site.
+/// Ligne de la palette : la sélection est peinte ici, bleu Adobe plein.
 /// AppKit ne la dessinait pas dans le rendu hors écran des images (le texte passait
 /// en blanc mais le fond bleu manquait) ; la peindre soi-même rend l'écran et les
 /// images identiques.
 final class PaletteRowView: NSTableRowView {
+    // La sélection reste en couleur « active » même quand c'est le CHAMP qui a le
+    // focus (toujours le cas dans la palette) : sinon le texte de la ligne
+    // sélectionnée restait gris sur le bleu (capture d'Isma, ligne « Crop »).
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        isSelected ? .emphasized : .normal
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
-        (isEmphasized ? NSColor.selectedContentBackgroundColor : NSColor.unemphasizedSelectedContentBackgroundColor).setFill()
-        bounds.fill()
+        PaletteStyle.selection.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
     }
 
     override func draw(_ dirtyRect: NSRect) {

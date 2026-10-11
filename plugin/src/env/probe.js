@@ -2,7 +2,7 @@
 const uxp = require("uxp");
 
 const PLUGIN_ID = "io.khanjar.executor";
-const PLUGIN_VERSION = "0.7.2"; // à garder synchro avec manifest.json
+const PLUGIN_VERSION = "0.7.3"; // à garder synchro avec manifest.json
 
 function helloPayload() {
   let hostVersion = "?";

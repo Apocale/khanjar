@@ -5,9 +5,11 @@ import PackageDescription
 // Les tests vivent dans Sources/Khanjar/Support/SelfTest.swift et
 // s'exécutent via `khanjar selftest` (code de sortie ≠ 0 en échec).
 // Avant le premier build : ../scripts/fetch-sparkle.sh (build-app.sh le fait seul).
+// macOS 13 minimum (décision Q7 du 2026-10-08) : comme LSMinimumSystemVersion dans
+// build-app.sh — seul macOS 26 est testé, le démarrage automatique exige 13.
 let package = Package(
     name: "Khanjar",
-    platforms: [.macOS(.v12)],
+    platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
             name: "khanjar",

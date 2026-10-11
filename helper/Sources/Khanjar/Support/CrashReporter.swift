@@ -60,16 +60,20 @@ enum CrashReporter {
         guard acceptedNames.contains(name) else { return nil }
 
         let exception = body["exception"] as? [String: Any] ?? [:]
-        let images = (body["usedImages"] as? [[String: Any]] ?? []).map { $0["name"] as? String ?? "?" }
+        let appPath = body["procPath"] as? String
+        let images = (body["usedImages"] as? [[String: Any]] ?? []).map {
+            (name: $0["name"] as? String ?? "?", path: $0["path"] as? String)
+        }
         var frames: [Frame] = []
         if let faulting = body["faultingThread"] as? Int,
            let threads = body["threads"] as? [[String: Any]], threads.indices.contains(faulting) {
             for raw in (threads[faulting]["frames"] as? [[String: Any]] ?? []).prefix(maxFrames) {
                 let index = raw["imageIndex"] as? Int ?? -1
-                let image = images.indices.contains(index) ? images[index] : "?"
+                let used = images.indices.contains(index) ? images[index] : (name: "?", path: nil)
+                let image = publishableImageName(used.name, path: used.path, appPath: appPath, acceptedNames: acceptedNames)
                 let offset = raw["imageOffset"] as? Int ?? 0
                 let function = (raw["symbol"] as? String).map(scrub) ?? "\(image) + \(offset)"
-                frames.append(Frame(image: image, function: function, inApp: acceptedNames.contains(image), offset: offset))
+                frames.append(Frame(image: image, function: function, inApp: acceptedNames.contains(used.name), offset: offset))
             }
         }
         // Message d'erreur Swift (« Fatal error: … ») : dans « asi » (Application Specific
@@ -87,6 +91,30 @@ enum CrashReporter {
             signal: exception["signal"] as? String ?? "?",
             message: message,
             frames: frames)
+    }
+
+    /// Remplace le nom d'une bibliothèque qui n'est ni du système ni de Khanjar.
+    static let maskedImageName = "<bibliothèque tierce>"
+
+    /// Nom de bibliothèque publiable dans un rapport.
+    ///
+    /// Audit sécurité A6 (2026-10-09, mineur 1) — les NOMS des bibliothèques de la
+    /// pile partaient tels quels (champ `package`, et en guise de fonction quand le
+    /// symbole manque). Une bibliothèque tierce chargée dans Khanjar (greffon, outil
+    /// injecté…) peut porter un nom personnel : « libInjecteur-JeanDupont.dylib »
+    /// partait en clair, contre la promesse de PRIVACY.md (« jamais ton nom »).
+    /// Gardés : Khanjar lui-même, ce qui est embarqué dans son app (Sparkle…) et les
+    /// bibliothèques du système (/System, /usr/lib, /Library/Apple) ; le reste est masqué.
+    static func publishableImageName(_ name: String, path: String?, appPath: String?,
+                                     acceptedNames: Set<String>) -> String {
+        if name == "?" || acceptedNames.contains(name) { return name }
+        guard let path else { return maskedImageName }
+        if ["/System/", "/usr/lib/", "/Library/Apple/"].contains(where: { path.hasPrefix($0) }) { return name }
+        if let appPath, let bundleEnd = appPath.range(of: ".app/") {
+            let bundle = appPath[..<bundleEnd.upperBound]          // « …/Khanjar.app/ »
+            if path.hasPrefix(bundle) { return name }
+        }
+        return maskedImageName
     }
 
     /// Masque ce qui pourrait identifier l'utilisateur dans un texte libre : dossiers

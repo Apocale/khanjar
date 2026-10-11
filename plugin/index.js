@@ -75,7 +75,9 @@ try {
 }
 
 log.info(`Khanjar démarré (host ${(() => { try { return uxp.host.name + " " + uxp.host.version; } catch (e) { return "?"; } })()})`);
-log.init().then(() => {
-  client.start();
-  log.flush();
-});
+// 2026-10-09 (audit P-04) : le client démarre TOUT DE SUITE. Il attendait
+// log.init() : si getDataFolder() ne répondait jamais, le plugin ne tentait
+// même pas de se connecter, sans laisser de fichier. Les lignes écrites
+// d'ici là restent en mémoire et partent au premier flush.
+client.start();
+log.init().then(() => log.flush());

@@ -23,7 +23,13 @@ enum LegacyMigration {
     @discardableResult
     /// `supportDir` : injectable pour les tests (dossier temporaire) — par
     /// défaut le vrai ~/Library/Application Support.
-    static func run(supportDir: URL? = nil, log: Logger = .shared) -> [String] {
+    ///
+    /// C-11 (2026-10-09) — chaque `selftest` écrivait « Reprise des données de
+    /// Dagger » dans le VRAI journal (28 lignes trouvées chez Isma, aucune réelle) :
+    /// au support, on aurait cru que la reprise rejouait à chaque lancement. Avec
+    /// un `supportDir` (bac à sable de test) et sans journal explicite, on se tait.
+    static func run(supportDir: URL? = nil, log: Logger? = nil) -> [String] {
+        let log = log ?? (supportDir == nil ? .shared : .muted)
         let fm = FileManager.default
         let support = supportDir ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let legacy = support.appendingPathComponent(legacyFolderName, isDirectory: true)

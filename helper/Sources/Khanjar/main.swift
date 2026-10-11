@@ -19,7 +19,39 @@ import ServiceManagement
 
 let log = Logger.shared
 let arguments = Array(CommandLine.arguments.dropFirst())
-let mode = arguments.first ?? "app"
+
+/// C-15 (2026-10-09) — `mode = arguments.first ?? "app"` prenait pour un mode CLI
+/// l'argument que macOS (ou Xcode) ajoute au lancement d'une app : `-psn_0_…` au
+/// premier lancement après « Ouvrir quand même », `-NSDocumentRevisionsDebugMode
+/// YES`… → « Mode inconnu », exit(1) : le monteur ne voyait rien après tout le
+/// parcours d'installation. Désormais : 1ᵉʳ argument en « - » → mode app ; dans
+/// l'app empaquetée, un mode inconnu → journal + mode app (le binaire de
+/// développement garde « Mode inconnu », utile en CLI).
+enum LaunchMode {
+    /// Une entrée par branche du `switch mode` ci-dessous : toute nouvelle branche
+    /// doit être ajoutée ici (sinon, dans Khanjar.app, elle lancerait le mode app).
+    static let known: Set<String> = [
+        "app", "run", "smoke", "index-presets", "index-preview", "index-build", "search", "selftest",
+        "frequents", "dump-selected", "multi-test", "apply-dump", "anchor-test", "stack-test", "adj-test",
+        "fidelity-test", "ease-probe", "inspect-component", "crash-test", "crash-report", "index-excluded",
+        "plan-dump", "login-item", "render-media",
+    ]
+
+    /// Vrai quand ce binaire est celui de Khanjar.app (pas le binaire de développement).
+    static var isPackagedApp: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+
+    /// Mode à lancer, et la raison s'il diffère du 1ᵉʳ argument (pour le journal).
+    static func resolveMode(_ arguments: [String], packaged: Bool) -> (mode: String, note: String?) {
+        guard let first = arguments.first else { return ("app", nil) }
+        if first.hasPrefix("-") { return ("app", "Argument système « \(first) » ignoré — mode app") }
+        if known.contains(first) || !packaged { return (first, nil) }
+        return ("app", "Mode inconnu « \(first) » dans l'app — mode app")
+    }
+}
+
+let launch = LaunchMode.resolveMode(arguments, packaged: LaunchMode.isPackagedApp)
+let mode = launch.mode
+if let note = launch.note { log.info(note) }
 
 /// Serveur bridge pour les modes CLI qui en ont besoin (le mode `app` a le
 /// sien via AppCoordinator — ne jamais en créer deux : un seul port).
@@ -264,8 +296,21 @@ case "app":
         .appendingPathComponent("Khanjar", isDirectory: true)
     try? FileManager.default.createDirectory(at: lockDir, withIntermediateDirectories: true)
     let lockFd = open(lockDir.appendingPathComponent(".instance.lock").path, O_CREAT | O_RDWR, 0o644)
-    if lockFd < 0 || flock(lockFd, LOCK_EX | LOCK_NB) != 0 {
+    // C-13 (2026-10-09) — deux causes étaient confondues sous « une autre instance
+    // tourne déjà » : un dossier où l'on ne peut pas écrire (rien ne tourne !) et un
+    // vrai verrou tenu. Et la 2ᵉ copie quittait en silence : elle prévient
+    // maintenant l'instance en service, qui ouvre ses Réglages. Le journal est
+    // vidé avant de quitter (écriture asynchrone : la ligne se perdait).
+    if lockFd < 0 {
+        log.error("Verrou d'instance impossible à ouvrir (\(String(cString: strerror(errno)))) — dossier Application Support/Khanjar non inscriptible ? Arrêt.")
+        log.waitForPendingWrites()
+        exit(0)
+    }
+    if flock(lockFd, LOCK_EX | LOCK_NB) != 0 {
         log.error("Une autre instance de Khanjar tourne déjà — arrêt de celle-ci.")
+        DistributedNotificationCenter.default().postNotificationName(
+            AppCoordinator.showSettingsNotification, object: nil, userInfo: nil, deliverImmediately: true)
+        log.waitForPendingWrites()
         exit(0)
     }
     // lockFd reste ouvert pour toute la vie du process (verrou tenu par le noyau).
@@ -616,6 +661,9 @@ case "anchor-test":
                 case .success(let applied):
                     let fid = applied["fidelity"] as? [String: Any] ?? [:]
                     log.info("apply OK — params posés=\(fid["paramsSet"] ?? "?") sautés=\(fid["paramsSkipped"] ?? "?")")
+                    if let detail = fid["detail"] as? [[String: Any]], !detail.isEmpty {
+                        log.info("détail : \(detail.prefix(12).map { $0.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ") }.joined(separator: " | "))")
+                    }
                     var readPayload: [String: Any] = ["sampleFractions": fractions]
                     if let componentMatch { readPayload["componentMatch"] = componentMatch }
                     server.request(cmd: "readParams", payload: readPayload, timeout: 15) { r in
@@ -1053,38 +1101,66 @@ case "frequents":
     usage.load()
     usage.seedIfNeeded(items: snapshot.items)
     let lookup = Dictionary(snapshot.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-    let ranked = usage.top(limit)
+    // Mêmes demandes que la palette (C-03) : top(limit × 2) et topPairs(5).
+    let ranked = usage.top(limit * 2)
     guard !ranked.isEmpty else {
         log.info("Classement vide : aucune application enregistrée pour l'instant.")
         exit(0)
     }
-    // Duos détectés : exactement ce que la palette met en tête de liste.
-    let duos = usage.topPairs(AppCoordinator.maxCombosShown)
-    log.info("── Duos détectés (≥ \(UsageStore.minPairObservations) enchaînements à moins de \(Int(UsageStore.pairWindowSeconds)) s) ──")
-    if duos.isEmpty { log.info("  aucun") }
-    for pair in duos {
+    // Un id présent dans l'index mais sous un autre titre n'est plus proposé (C-04),
+    // sauf preset renommé : ancien titre porté par plus aucun item (m3). Même règle
+    // que la palette (AppCoordinator.currentItem).
+    let titleIndex = AppCoordinator.titleIndex(snapshot.items)
+    let idsForTitle: (String) -> Set<String> = { titleIndex[SearchItem.normalizedTitle($0)] ?? [] }
+    func sameTitle(_ id: String, _ title: String?) -> Bool {
+        AppCoordinator.currentItem(id: id, storedTitle: title, lookup: lookup, idsForTitle: idsForTitle) != nil
+    }
+    let pairs = usage.topPairs(5)
+    log.info("── Duos détectés (≥ \(UsageStore.minPairObservations) enchaînements sur un même clip à moins de \(Int(UsageStore.pairWindowSeconds)) s, sens retenu à \(UsageStore.pairDominance) contre 1) ──")
+    if pairs.isEmpty { log.info("  aucun") }
+    var placedDuos = 0
+    for pair in pairs {
         guard let a = lookup[pair.from], let b = lookup[pair.to] else {
             log.info("  ⚠️ duo ignoré : membre absent de l'index (\(pair.from) → \(pair.to))"); continue
+        }
+        guard sameTitle(pair.from, usage.title(for: pair.from)), sameTitle(pair.to, usage.title(for: pair.to)) else {
+            log.info("  ⚠️ duo ignoré : un membre porte un autre titre que celui mémorisé (\(a.title) → \(b.title))"); continue
         }
         guard let combo = SearchItem.combining(a, b, pairCount: pair.count) else {
             log.info("  ⚠️ fusion refusée : \(a.title) + \(b.title) (intrinsèques en conflit ou plan trop lourd)"); continue
         }
+        placedDuos += 1
         let stack = combo.plan.operations.map { $0.matchName.replacingOccurrences(of: "AE.ADBE ", with: "") }
-        log.info("  ★ \(combo.title)  — \(pair.count) fois")
+        let shown = placedDuos <= AppCoordinator.maxCombosShown ? "" : " (hors liste : \(AppCoordinator.maxCombosShown) duos au plus)"
+        log.info("  ★ \(combo.title)  — \(pair.count) fois\(shown)")
         log.info("      pile obtenue (haut→bas) : \(stack.joined(separator: " › "))")
-        log.info("      un seul Cmd+Z au lieu de deux")
+        // Q3 (2026-10-09) : l'ancienne ligne promettait « un seul Cmd+Z au lieu de deux ».
+        // Un duo s'annule comme UN preset : un ⌘Z s'il ne porte que des effets nus,
+        // deux avec des réglages (un effet n'expose ses réglages qu'une fois posé).
+        log.info("      un seul geste au lieu de deux ; annulation : un ⌘Z pour des effets nus, deux avec des réglages (trois avec des keyframes maintien ou bézier non cuits)")
     }
+    let scores = Dictionary(ranked.map { ($0.id, $0.score) }, uniquingKeysWith: { a, _ in a })
+    let rows = AppCoordinator.frequentRows(limit: limit, ranked: ranked, pairs: pairs, lookup: lookup,
+                                           titleOf: { usage.title(for: $0) }, idsForTitle: idsForTitle)
     log.info("── Fréquents (demi-vie \(Int(UsageStore.halfLifeDays)) j) — ce que ⌘J affichera ──")
-    for (i, entry) in ranked.enumerated() {
+    for (i, row) in rows.enumerated() {
         // Seules les 10 premières lignes portent un raccourci (⌘1…⌘9, ⌘0).
         let key = i < 9 ? "⌘\(i + 1)" : (i == 9 ? "⌘0" : "  ")
-        let item = lookup[entry.id]
-        let title = item?.title ?? "(disparu de l\'index)"
+        let title = row.item.title
         let padded = title.count >= 32 ? String(title.prefix(31)) + "…"
                                        : title + String(repeating: " ", count: 32 - title.count)
-        let uses = String(format: "%5d", entry.count)
-        let score = String(format: "%7.2f", entry.score)
-        log.info("  \(key)  \(padded) \(uses) ×   score \(score)   \(item?.subtitle ?? entry.id)")
+        let uses = String(format: "%5d", row.count)
+        let score = scores[row.item.id].map { String(format: "%7.2f", $0) } ?? "    duo"
+        log.info("  \(key)  \(padded) \(uses) ×   score \(score)   \(row.item.subtitle)")
+    }
+    // Entrées sautées (C-03) : la palette les remplace par les suivantes.
+    let skipped = ranked.filter { !sameTitle($0.id, $0.title) }
+    if !skipped.isEmpty {
+        log.info("── Écartés (remplacés par les suivants) ──")
+        for entry in skipped {
+            let why = lookup[entry.id].map { "titre devenu « \($0.title) »" } ?? "disparu de l'index"
+            log.info("  ✗ \(entry.title) (\(entry.id)) — \(why)")
+        }
     }
     exit(0)
 

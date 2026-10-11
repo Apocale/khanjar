@@ -1,46 +1,67 @@
+<p align="center">
+  <img src="docs/media/banner.jpg" width="900" alt="Khanjar, the ⌘J command palette for Adobe Premiere Pro: a curved khanjar dagger slicing through a film strip">
+</p>
+
 # Khanjar
 
-**A Spotlight-style command palette for Adobe Premiere Pro on macOS.**
-Press **⌘J**, type a few letters, hit **Enter**: the effect or preset is applied to every
-selected clip, in a single undo step.
+**A free command palette for Adobe Premiere Pro on Mac.** Press **⌘J**, type a few letters of any
+effect or preset, press **Enter**: it lands on every clip you selected.
 
-*Khanjar* (خنجر) means "dagger" in Arabic, Persian and Urdu.
+No panel to open, no folder to dig through, no mouse. Your most used presets wait at the top of the
+palette on ⌘1 to ⌘0, and any preset can get its own keyboard shortcut.
 
-> **Beta.** Free and open source. Not affiliated with or endorsed by Adobe.
+> Free and open source (GPL-3.0) · macOS on Apple Silicon · Premiere Pro 2026 · Beta · Not affiliated
+> with Adobe.
 
 <p align="center">
   <img src="docs/media/demo.gif" width="720" alt="Press ⌘J, type “gauss”, press Enter: Gaussian Blur is applied to the selected clips">
 </p>
 
-<p align="center"><a href="https://github.com/Apocale/khanjar/releases/latest"><b>Download the latest version</b></a> · <a href="docs/INSTALL.md">Install in 3 minutes</a> · <a href="docs/INSTALL.md#install-with-claude-code-easiest">Install with Claude Code</a> · <a href="docs/INSTALL.fr.md">En français</a></p>
+<p align="center"><a href="https://github.com/Apocale/khanjar/releases/latest"><b>Download</b></a> · <a href="docs/INSTALL.md">Install in 3 minutes</a> · <a href="docs/INSTALL.md#install-with-claude-code-easiest">Let Claude Code install it</a> · <a href="docs/INSTALL.fr.md">En français</a> · <a href="https://apocale.github.io/khanjar/">Website</a></p>
 
-## What it does
+*Khanjar* (خنجر) means "dagger" in Arabic, Persian and Urdu. A dagger, because editing is cutting.
 
-- **One search box for everything**: all video effects, your own presets and Adobe's presets.
-  Fuzzy search, so `tds` finds *True Drop Shadow*.
-- **Applies to many clips at once**: select 1 or 150 clips, one keystroke, one ⌘Z to undo.
-- **Opens on what you actually use**: with an empty search box, the palette lists your most used
-  items, ranked by frequency *and* recency. **⌘1 … ⌘0** apply them directly.
-- **Duos**: when you always apply two presets one after the other, Khanjar offers them as a single
-  item, stacked in the order you use.
-- **Animated presets that look native**: keyframes are anchored like Premiere does (scaled, in-point
-  or out-point anchored), and eased curves are reproduced frame by frame.
-- **Your own shortcuts**: assign a key combination to any preset in Settings.
-- **Adjustment layer at the playhead**: **⌘⇧J** drops an adjustment layer above your clips.
-- **Automatic updates**, signed so that only genuine Khanjar releases can install.
-- English and French interface.
+## Why it exists
 
-## A closer look
+You don't use 420 effects. You use the same few, all day long. Here is what the author applied over
+three months of real editing:
 
-**The palette opens on what you use most.** ⌘1 to ⌘0 apply an item without typing.
-A *duo* (two presets you always chain) is one keystroke.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/usage-dark.svg">
+  <img src="docs/media/usage-light.svg" width="860" alt="Bar chart: 1,279 applications over three months, 41 different items out of about 420, the top three presets account for 74 percent">
+</picture>
+
+So Khanjar opens on what you actually use, ranked by how often *and* how recently you used it.
+Press ⌘J and ⌘1 applies your number one. Start typing and it searches everything else.
+
+## The mouse way, or ⌘J
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/ways-dark.svg">
+  <img src="docs/media/ways-light.svg" width="860" alt="In Premiere with the mouse: open Effects, search, open the folder, drag onto the clips. With Khanjar: ⌘J, two or three letters, Enter. Most used items: ⌘J then ⌘1">
+</picture>
+
+## One stroke, every clip
+
+<p align="center">
+  <img src="docs/media/one-stroke.jpg" width="860" alt="The same dagger slicing through four film strips in a single stroke">
+</p>
+
+Select one clip or 150, press Enter once. Every clip gets the effect, or the whole preset with its
+settings and keyframes. Undo stays simple: one ⌘Z for an effect, two or three for a preset, not one
+per clip.
+
+## What it looks like
+
+**It opens on what you use most.** ⌘1 to ⌘0 apply an item without typing. When you always chain two
+presets on the same clip, Khanjar offers them as one *duo*, stacked the way you apply them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/palette-frequent-dark.png">
   <img src="docs/media/palette-frequent-light.png" width="720" alt="Khanjar palette listing the most used presets with ⌘1 to ⌘8 shortcuts">
 </picture>
 
-**Fuzzy search across effects and presets.** Type a word, or just the initials.
+**It finds things the way you remember them.** A word, half a word, or just the initials.
 
 <table>
   <tr>
@@ -61,46 +82,105 @@ A *duo* (two presets you always chain) is one keystroke.
 
 <sub>These screens are drawn by Khanjar itself (<code>khanjar render-media</code>) with example presets.</sub>
 
-## Requirements
+## Your presets, wherever they come from
 
-- A Mac with **Apple Silicon** (M1 or later), macOS 13 or later (tested on macOS 26).
-- **Adobe Premiere Pro 2026** (version 26.x) and the **Creative Cloud** desktop app, which installs
-  Khanjar's companion plugin inside Premiere.
-- Tested on macOS 26 with Premiere Pro 26.5.
+Khanjar reads the presets in your own Premiere: the ones you made, the packs you bought, the ones a
+friend sent you. Adobe's presets are there too. Presets saved in a Premiere set to another language
+work as well.
+
+Animated presets keep their timing. Keyframes are stretched to the clip, or pinned to its start or
+end, the way Premiere does it, and eased curves are rebuilt frame by frame so the motion matches.
+
+And a few more things:
+
+- **⌘⇧J** drops an adjustment layer above your clips, at the playhead.
+- **Your own shortcuts**: menu bar icon > *Settings…* > *Add a shortcut…*, pick a preset, press keys.
+- **Updates itself**, signed, so only genuine Khanjar releases can install.
+- English and French interface.
 
 ## Install
 
-Easiest: paste the [Claude Code install prompt](docs/INSTALL.md#install-with-claude-code-easiest) ([en français](docs/INSTALL.fr.md#installer-avec-claude-code-le-plus-simple)).
-Or download the latest `Khanjar-<version>.zip` from [Releases](../../releases), then follow the
-[installation guide](docs/INSTALL.md) ([en français](docs/INSTALL.fr.md)).
-The beta is not signed by Apple yet, so macOS asks you to confirm the first launch — the guide
-shows how (once, about a minute).
+**Requirements**: a Mac with **Apple Silicon** (M1 or later) on macOS 13 or later, **Premiere Pro
+2026** (26.x) or later, and the **Creative Cloud** desktop app (it installs Khanjar's small plugin
+inside Premiere). Tested on macOS 26 with Premiere Pro 26.5.
 
-## Known limits
+- Easiest: paste the [Claude Code install prompt](docs/INSTALL.md#install-with-claude-code-easiest)
+  ([en français](docs/INSTALL.fr.md#installer-avec-claude-code-le-plus-simple)) and let it do the steps.
+- Or download `Khanjar-<version>.zip` from [Releases](https://github.com/Apocale/khanjar/releases/latest)
+  and follow the [installation guide](docs/INSTALL.md) ([en français](docs/INSTALL.fr.md)).
+
+The beta is not signed by Apple yet, so macOS asks you to confirm the first launch. The guide shows
+how; it takes about a minute, once.
+
+## Honest limits
 
 These come from what Adobe's plugin API allows today:
 
-- Presets that rely on a **mask** shape, or on Lumetri **curves, color wheels or LUTs**, cannot be
-  replayed faithfully, so they are left out of the palette rather than applied wrong. Lumetri presets
-  that only move sliders (exposure, contrast, vignette…) work.
-- A preset is marked *partial* when one of its effects no longer exists in your version of
-  Premiere, or one of its settings cannot be set through Adobe's plugin API; the rest is applied.
-- Khanjar **cannot create** an adjustment layer: create one once in your project
-  (*File > New > Adjustment Layer*), Khanjar reuses it.
-- Audio effects and transitions are not supported yet.
+- Presets that rely on a **mask**, or on Lumetri **curves, color wheels or LUTs**, are left out of the
+  palette rather than applied wrong. Lumetri presets that only move sliders (exposure, contrast,
+  vignette…) work.
+- A preset is marked *partial* when one of its effects no longer exists in your Premiere, or one of
+  its settings can't be set through the API. The rest is applied.
+- Eased animations are rebuilt frame by frame: the motion matches, but Effect Controls shows one
+  keyframe per frame instead of two.
+- Khanjar **can't create** an adjustment layer. Make one once in your project (*File > New >
+  Adjustment Layer*) and Khanjar reuses it.
+- Audio effects and transitions aren't supported yet.
 
 ## Privacy
 
-Khanjar runs entirely on your Mac. It talks to Premiere through a local connection
-(`127.0.0.1`) that web pages are not allowed to use.
+Khanjar runs entirely on your Mac. It talks to Premiere through a local connection that web pages
+are not allowed to use. Your clips, projects and presets never leave your computer.
 
-Two optional things use the internet: **update checks** (Khanjar asks you on its second launch;
-it then reads the list of releases on GitHub) and **anonymous crash reports**, only if you tick
-*Send anonymous crash reports* (off by default). It contains the versions and where in the code
-the crash happened — never your clips, presets, projects, file paths or anything identifying you.
-Details: [PRIVACY.md](PRIVACY.md).
+One optional thing uses the internet: **update checks** (Khanjar asks on its second launch, then
+reads the list of releases on GitHub). Details: [PRIVACY.md](PRIVACY.md).
 
-## How it works
+## Questions people ask
+
+**Is there a command palette, a Spotlight or a quick search for Adobe Premiere Pro?**
+Yes, that is what Khanjar is: press ⌘J in Premiere, type a few letters of any effect or preset,
+press Enter.
+
+**How do I apply an effect or a preset to many clips at once in Premiere Pro?**
+Select the clips in the timeline, press ⌘J, pick the effect or preset. It lands on every selected
+clip in one step, and you undo it with one ⌘Z for an effect, two or three for a preset.
+
+**Can I assign a keyboard shortcut to a preset in Premiere Pro?**
+Yes: menu bar icon > *Settings…* > *Add a shortcut…*, choose the preset, press the key combination.
+The shortcut works whenever Premiere is in front.
+
+**How do I add an adjustment layer at the playhead with a shortcut?**
+Press ⌘⇧J. Create one adjustment layer in your project once; Khanjar reuses it.
+
+**Does it work with the preset packs I bought, or presets made in another language?**
+Yes. Khanjar reads your own Premiere *Effect Presets* (where installed packs live) and Adobe's,
+including presets saved in a Premiere set to another language. Third-party effects used by a pack
+must be installed in your Premiere.
+
+**Do animated presets keep their timing and their easing?**
+Yes. Keyframes follow the preset's anchoring (stretched to the clip, or pinned to its start or end),
+and eased curves are reproduced frame by frame.
+
+**Which versions of Premiere Pro does it work with?**
+Premiere Pro 2026 (26.x) and later, tested on 26.5. Older versions aren't supported.
+
+**Is it free? Does it work on Windows or Intel Macs?**
+Free and open source (GPL-3.0). macOS on Apple Silicon only for now.
+
+**Does it slow Premiere down?**
+No. Khanjar does nothing until you press a shortcut. An effect is applied in about 5 to 15 ms; a
+preset on 283 clips took a third of a second.
+
+**Can an AI assistant install it for me?**
+Yes. The [install guide](docs/INSTALL.md#install-with-claude-code-easiest) has a prompt you paste
+into Claude Code: it checks your Mac, downloads the latest Khanjar and installs it one step at a time,
+asking you before anything that matters.
+
+**How do I uninstall it?**
+See [Uninstall](docs/INSTALL.md#uninstall) in the guide: quit Khanjar, move it to the Trash, and
+remove its plugin with one command.
+
+## Under the hood
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/how-it-works-dark.svg">
@@ -109,18 +189,19 @@ Details: [PRIVACY.md](PRIVACY.md).
 
 Two processes and a small protocol:
 
-- **`helper/`** — the native Swift app (menu bar): global shortcut, palette window, search index,
+- **`helper/`**: the native Swift app in the menu bar. Global shortcut, palette window, search index,
   preset parsing (`.prfpset`), local WebSocket server.
-- **`plugin/`** — a headless UXP plugin inside Premiere: a stateless executor that applies what the
-  app asks for.
+- **`plugin/`**: a headless UXP plugin inside Premiere. A stateless executor that applies what the app
+  asks for, in grouped transactions, so undo never goes clip by clip.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md).
-Developer notes, including many hard-won findings about Premiere's API, are in
-[AGENTS.md](AGENTS.md) (in French).
+Developer notes, with many hard-won findings about Premiere's UXP API (in French), are in
+[AGENTS.md](AGENTS.md).
 
-## Build from source
+### Build from source
 
-Requires the Xcode Command Line Tools (Swift 5.9 or later) and Python 3.
+Requires the Xcode Command Line Tools (Swift 5.9 or later), Python 3 and Node.js (the plugin build
+syntax-checks its JavaScript with `node --check`).
 
 ```bash
 ./scripts/build-app.sh        # builds dist/Khanjar.app with the plugin embedded
@@ -131,48 +212,29 @@ cd helper && swift build && ./.build/debug/khanjar selftest
 Updates use [Sparkle](https://sparkle-project.org), downloaded and checksum-verified by
 `scripts/fetch-sparkle.sh`. Releases are prepared by `scripts/release.sh`.
 
-## FAQ
+## Made by an editor, with AI
 
-**Is there a Spotlight or command palette for Adobe Premiere Pro?**
-Yes, that is what Khanjar is: press ⌘J in Premiere, type a few letters of any effect or preset,
-press Enter.
+Khanjar is made by Isma, a video editor, not a programmer. It was built with Claude Code, an AI
+coding assistant: he described what he needed in Premiere, the AI wrote the code, and the features
+are tested in a real Premiere, on throwaway projects and in his daily editing.
 
-**How do I apply an effect or a preset to many clips at once in Premiere Pro?**
-Select the clips in the timeline, press ⌘J, pick the effect or preset. It lands on every selected
-clip in one step, and one ⌘Z undoes it.
-
-**Can I assign a keyboard shortcut to a preset in Premiere Pro?**
-Yes: menu bar icon > *Settings…* > *Add a shortcut…*, choose the preset, press the key combination.
-
-**How do I add an adjustment layer at the playhead with a shortcut?**
-Press ⌘⇧J. Create one adjustment layer in your project once; Khanjar reuses it.
-
-**Does it work with the preset packs I bought, or presets made in another language?**
-Yes. Khanjar reads your own Premiere *Effect Presets* (where installed packs live) and Adobe's,
-including presets saved in a Premiere set to another language. Third-party effects used by a pack
-must be installed in your Premiere.
-
-**Do animated presets keep their timing?**
-Yes. Keyframes follow the preset's anchoring (stretched to the clip, or pinned to its start or end),
-and eased curves are reproduced frame by frame.
-
-**Is it free? Does it work on Windows or Intel Macs?**
-Free and open source (GPL-3.0). macOS on Apple Silicon only for now.
-
-**Does it slow Premiere down?**
-No. An effect is applied in about 5 to 15 ms; Khanjar does nothing until you press a shortcut.
+The rest of this page is made with AI too. The dagger images were generated with GPT Image 2.5, the
+diagrams are drawn in code (SVG) by Claude, and the palette screenshots are rendered by Khanjar
+itself. The usage chart comes from the author's own Khanjar log.
 
 ## En français
 
 Khanjar est une palette gratuite pour Adobe Premiere Pro sur Mac : presse ⌘J, tape quelques
 lettres d'un effet ou d'un preset, Entrée, et il s'applique à tous les clips sélectionnés. La palette
-s'ouvre sur tes presets les plus utilisés, et tu peux mettre un raccourci clavier sur n'importe quel
-preset. Interface en français. [Guide d'installation](docs/INSTALL.fr.md).
+s'ouvre sur tes presets les plus utilisés (⌘1 à ⌘0), et tu peux mettre un raccourci clavier sur
+n'importe quel preset. Interface en français. Fait par un monteur, avec l'IA.
+[Guide d'installation](docs/INSTALL.fr.md).
 
 ## Contributing
 
-Bug reports and ideas are welcome: open an [issue](../../issues). See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports and ideas are welcome: open an [issue](https://github.com/Apocale/khanjar/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[GPL-3.0](LICENSE) — made by Isma.
+[GPL-3.0](LICENSE) · made by Isma, with AI.

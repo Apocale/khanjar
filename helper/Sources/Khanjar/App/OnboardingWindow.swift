@@ -56,7 +56,14 @@ final class OnboardingWindowController: NSObject {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    private func refresh() {
+    /// Fenêtre d'accueil à l'écran (rafraîchie à chaque changement d'état du plugin).
+    var isVisible: Bool { window?.isVisible == true }
+
+    /// C-05 (2026-10-09) — appelée seulement à l'ouverture, la ligne d'état restait
+    /// figée sur « En attente de Premiere… » même après le hello, et la case
+    /// « démarrage auto » ne suivait pas `login-item on` lancé fenêtre ouverte.
+    /// Désormais appelable : l'app la rappelle à chaque changement d'état du plugin.
+    func refresh() {
         statusLabel.stringValue = statusProvider?() ?? ""
         startupCheckbox.state = Self.isLoginItemEnabled ? .on : .off
         crashCheckbox.state = (crashReportsEnabled?() ?? false) ? .on : .off

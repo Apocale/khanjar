@@ -3,10 +3,36 @@ import AppKit
 /// Bouton « enregistreur de raccourci » : au clic, capture la PROCHAINE frappe
 /// (via un moniteur local `.keyDown`) et la convertit en chaîne "cmd+shift+p".
 /// Consomme l'événement pour qu'il ne fuite pas dans la fenêtre.
+///
+/// 2026-10-09 (audit A4#4, A4#6, B2#3, décision Q8 d'Isma) :
+///  - la touche est retenue par sa POSITION (keyCode → `SettingsStore.token`), plus par
+///    le caractère : en AZERTY, ⌃⌥A s'inscrivait sur la touche Q (A↔Q, Z↔W, M), en
+///    QWERTZ Y↔Z, et tout clavier non latin était refusé ;
+///  - ⌘ ou ⌃ obligatoire : ⇧T ou ⌥N seuls avalaient ensuite la frappe dans Premiere
+///    (plus moyen de taper un T majuscule) ;
+///  - les raccourcis de Premiere (⌘A ⌘C ⌘V ⌘X ⌘Z ⌘⇧Z ⌘S ⌘Q ⌘W) sont refusés ;
+///  - le refus s'explique SOUS le bouton (`messageLabel`, 2 lignes) : dans le bouton de
+///    180 pt, « Combinaison invalide — pr… » était coupé, et faux pour un clavier non latin ;
+///  - un enregistrement abandonné (fenêtre fermée ou quittée, réglages rechargés, autre
+///    enregistreur cliqué) s'arrête : il avalait la 1ʳᵉ frappe de la palette.
 final class ShortcutRecorder: NSButton {
     private(set) var shortcut: String?      // "cmd+shift+p" si valide, sinon nil
     private var monitor: Any?
+    private var windowObservers: [NSObjectProtocol] = []
+    /// Un seul enregistreur armé à la fois : cliquer le second arrête le premier.
+    private static weak var armed: ShortcutRecorder?
     var onChange: (() -> Void)?
+    var isRecording: Bool { monitor != nil }
+
+    /// Raison d'un refus, à placer SOUS le bouton par la vue qui l'accueille (caché sinon).
+    let messageLabel: NSTextField = {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .systemRed
+        label.maximumNumberOfLines = 2
+        label.isHidden = true
+        return label
+    }()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -18,45 +44,98 @@ final class ShortcutRecorder: NSButton {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Verdict sur une frappe, sans état : testable sans clavier.
+    enum Verdict: Equatable { case cancel, accepted(String), refused(String) }
+
+    static func verdict(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Verdict {
+        if keyCode == 53 { return .cancel }   // Échap : on garde la valeur précédente
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command) || flags.contains(.control) else {
+            return .refused(L("Use ⌘ or ⌃ with a key"))
+        }
+        guard let key = SettingsStore.token(forKeyCode: keyCode) else {
+            return .refused(L("Key not supported — try another"))
+        }
+        var parts: [String] = []
+        if flags.contains(.command) { parts.append("cmd") }
+        if flags.contains(.option)  { parts.append("alt") }
+        if flags.contains(.control) { parts.append("ctrl") }
+        if flags.contains(.shift)   { parts.append("shift") }
+        parts.append(key)
+        let combo = parts.joined(separator: "+")
+        guard SettingsStore.parseShortcut(combo) != nil else {
+            return .refused(L("Key not supported — try another"))
+        }
+        if SettingsStore.isReservedShortcut(combo) {
+            return .refused(L("Premiere already uses this shortcut — choose another"))
+        }
+        return .accepted(combo)
+    }
+
     @objc private func startRecording() {
+        if let other = Self.armed, other !== self { other.cancelRecording() }
+        stopRecording()
+        Self.armed = self
         title = L("Press your combination…")
-        stopMonitor()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.capture(event)
-            return nil // événement consommé
+            guard let self else { return event }
+            return self.handle(event)
+        }
+        if let window {
+            for name in [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification] {
+                windowObservers.append(NotificationCenter.default.addObserver(
+                    forName: name, object: window, queue: nil) { [weak self] _ in self?.cancelRecording() })
+            }
         }
     }
 
-    private func capture(_ event: NSEvent) {
-        stopMonitor()
-        // Échap annule l'enregistrement, restaure l'état précédent.
-        if event.keyCode == 53 { title = displayTitle(); return }
-        var parts: [String] = []
-        let f = event.modifierFlags
-        if f.contains(.command) { parts.append("cmd") }
-        if f.contains(.option)  { parts.append("alt") }
-        if f.contains(.control) { parts.append("ctrl") }
-        if f.contains(.shift)   { parts.append("shift") }
-        let key = (event.charactersIgnoringModifiers ?? "").lowercased()
-        parts.append(key)
-        let combo = parts.joined(separator: "+")
-        if !key.isEmpty, SettingsStore.parseShortcut(combo) != nil {
-            shortcut = combo
-        } else {
-            shortcut = nil // pas de modificateur, ou touche non supportée
+    /// Frappe vue par le moniteur. Rend nil si elle est consommée ; une frappe destinée
+    /// à une AUTRE fenêtre (la palette…) est rendue intacte.
+    func handle(_ event: NSEvent) -> NSEvent? {
+        guard isRecording, event.window === window else { return event }
+        stopRecording()
+        let verdict = Self.verdict(keyCode: event.keyCode, modifiers: event.modifierFlags)
+        switch verdict {
+        case .cancel: showMessage(nil)
+        case .refused(let reason): showMessage(reason)   // la valeur précédente reste en place
+        case .accepted(let combo): shortcut = combo; showMessage(nil)
         }
         title = displayTitle()
-        onChange?()
+        if case .accepted = verdict { onChange?() }
+        return nil
+    }
+
+    /// Abandon sans rien changer (fenêtre fermée ou quittée, réglages rechargés).
+    func cancelRecording() {
+        guard isRecording else { return }
+        stopRecording()
+        title = displayTitle()
     }
 
     private func displayTitle() -> String {
         if let s = shortcut { return SettingsStore.pretty(s) }
-        return L("Invalid combination — press at least one modifier")
+        return L("Click, then press a key")
     }
 
-    func set(_ combo: String?) { shortcut = combo; title = combo == nil ? L("Click, then press a key") : SettingsStore.pretty(combo!) }
-    private func stopMonitor() { if let m = monitor { NSEvent.removeMonitor(m); monitor = nil } }
-    deinit { stopMonitor() }
+    private func showMessage(_ text: String?) {
+        messageLabel.stringValue = text ?? ""
+        messageLabel.isHidden = text == nil
+    }
+
+    func set(_ combo: String?) {
+        stopRecording()
+        shortcut = combo
+        showMessage(nil)
+        title = displayTitle()
+    }
+
+    private func stopRecording() {
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        windowObservers.removeAll()
+        if Self.armed === self { Self.armed = nil }
+    }
+    deinit { stopRecording() }
 }
 
 /// Feuille modale « Nouveau raccourci » : recherche floue d'un preset/effet
@@ -125,7 +204,9 @@ final class PresetShortcutSheet: NSObject, NSTableViewDataSource, NSTableViewDel
         let buttons = NSStackView(views: [NSView(), cancel, addButton])
         buttons.spacing = 8
 
-        let stack = NSStackView(views: [heading, search, scroll, recRow, buttons])
+        // Raison d'un refus de l'enregistreur, sous la ligne du raccourci (2 lignes max).
+        recorder.messageLabel.preferredMaxLayoutWidth = 348
+        let stack = NSStackView(views: [heading, search, scroll, recRow, recorder.messageLabel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12

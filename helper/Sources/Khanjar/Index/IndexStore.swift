@@ -1,5 +1,14 @@
 import Foundation
 
+/// Recherche du fichier de presets perso (contrat C-08, 2026-10-09) : un refus d'accès
+/// (Documents non autorisé) n'est plus confondu avec « pas de presets ». La chaîne de
+/// `.accessDenied` décrit l'erreur pour le journal, sans chemin complet.
+enum UserPresetLookup {
+    case found(URL)
+    case noFile
+    case accessDenied(String)
+}
+
 /// Construction et persistance de l'index de recherche.
 /// Sources : effets (via plugin) + presets (parser prfpset).
 /// v1 : items vidéo uniquement (l'application audio n'est pas exposée par UXP).
@@ -17,12 +26,16 @@ enum IndexStore {
         items.reserveCapacity(effects.count + userPresets.count + factoryPresets.count)
 
         for effect in effects {
+            var keywords = [effect.matchName]
+            if let english = englishEffectNames[effect.matchName], english != effect.displayName {
+                keywords.append(english)
+            }
             items.append(SearchItem(
                 id: "effect:\(effect.matchName)",
                 kind: "effect",
                 title: effect.displayName,
                 subtitle: L("Video effect"),
-                keywords: [effect.matchName],
+                keywords: keywords,
                 plan: ApplyPlan(label: effect.displayName,
                                 operations: [.init(matchName: effect.matchName)]),
                 fidelityHint: "full"
@@ -40,6 +53,38 @@ enum IndexStore {
         items.append(contentsOf: presetItems(factoryPresets, adobe: true, addable: addable))
         return items
     }
+
+    /// Nom ANGLAIS des effets dont le matchName ne le contient pas (2026-10-09, audit B2#5,
+    /// A3#6) : dans un Premiere français, « gaussian blur » (le vocabulaire des tutos) ne
+    /// trouvait que « Flou gaussien (hérité) », pas le nouveau « Flou gaussien »
+    /// (AE.Impact_Blur_FX). Relevé sur l'index anglais de Premiere 26.5.2 (108 effets) ;
+    /// ajouté aux mots-clés de l'effet, jamais au titre.
+    static let englishEffectNames: [String: String] = [
+        "AE.Impact_Alpha_FX": "Logo Cutout",
+        "AE.Impact_Blur_FX": "Gaussian Blur",
+        "AE.Impact_Crop_FX": "Rounded Crop",
+        "AE.Impact_Flare_FX": "Lens Flare",
+        "AE.Impact_Magnifier_FX": "Magnify",
+        "AE.Impact_Rotate_FX": "3D Rotate",
+        "AE.ADBE AEFilterAutoFramer": "Auto Reframe",
+        "AE.ADBE Geometry2": "Transform",
+        "AE.ADBE LightingEffect": "Lighting Effects",
+        "AE.ADBE Lumetri": "Lumetri Color",
+        "AE.ADBE Motion Blur": "Directional Blur (Legacy)",
+        "AE.ADBE PPro Metadata": "Metadata & Timecode Burn-in",
+        "AE.ADBE Strobe": "Strobe Light",
+        "AE.ADBE SubspaceStabilizer": "Warp Stabilizer",
+        "AE.Mettle SkyBox Blur": "VR Blur",
+        "AE.Mettle SkyBox Chromatic Aberrations": "VR Chromatic Aberrations",
+        "AE.Mettle SkyBox Color Gradients": "VR Color Gradients",
+        "AE.Mettle SkyBox Denoise": "VR De-Noise",
+        "AE.Mettle SkyBox Digital Glitch": "VR Digital Glitch",
+        "AE.Mettle SkyBox Fractal Noise": "VR Fractal Noise",
+        "AE.Mettle SkyBox Glow": "VR Glow",
+        "AE.Mettle SkyBox Project 2D": "VR Plane to Sphere",
+        "AE.Mettle SkyBox Rotate Sphere": "VR Rotate Sphere",
+        "AE.Mettle SkyBox Sharpen": "VR Sharpen",
+    ]
 
     /// Effets intrinsèques de Premiere : déjà présents sur chaque clip, non
     /// ajoutables par createComponent → leurs params se posent sur le composant
@@ -85,6 +130,14 @@ enum IndexStore {
     /// (la LUT elle-même vit dans un Arb : l'index seul ne veut rien dire).
     static let lumetriSkippedParameterIDs: Set<String> = ["130", "121", "5", "25", "127", "128"]
 
+    /// Cases sans nom de Lumetri qui valent `true` par défaut = activation d'une section
+    /// (Vignette 50, Roues 46, courbes TSL 104-111…). Relevé le 2026-10-09 sur 379 Lumetri
+    /// (profil d'Isma + 40 bibliothèques du SSD) : toujours `true`, sauf 68 (3 fois) et 104
+    /// (7 fois) décochées. Les cases sans nom 62, 74, 76 et 97 valent `false` dans les 379 :
+    /// ce ne sont pas des sections, elles ne comptent pas (I-10).
+    static let lumetriSectionToggleIDs: Set<String> = ["3", "23", "37", "46", "50", "68", "102",
+                                                       "104", "105", "107", "109", "111", "118"]
+
     /// Un Lumetri est rejouable si TOUS ses Arb sont neutres (le preset ne fait que
     /// bouger des curseurs) et qu'aucun menu LUT/Look n'est choisi. Analyse du
     /// 2026-10-07 : 8 des 18 presets couleur d'Isma, et 88 % des Lumetri de ses projets
@@ -109,6 +162,19 @@ enum IndexStore {
             if isLumetri, param.isArb, param.arbNeutral == true { continue }
             total += 1
             guard !param.isArb else { continue }
+            // 2026-10-09 (audit A3#11, I-10, correction PRUDENTE) : les cases d'activation des
+            // sections Lumetri n'ont pas de nom et étaient sautées sans être comptées. Une
+            // section DÉCOCHÉE mais réglée (Vignette Amount −3) serait rejouée ACTIVE : ses
+            // curseurs sont posés, pas la case. Tant que T-16 n'a pas vérifié dans Premiere
+            // qu'écrire cette case par index est sûr, elle est comptée sans être posée → badge
+            // « partiel ». Seulement les cases de SECTION (`lumetriSectionToggleIDs`) : la règle
+            // du plan (« toute case sans nom à false ») aurait marqué « partiel » tous les Lumetri,
+            // dont les 8 d'Isma, à cause des cases sans nom qui valent toujours false.
+            if isLumetri, param.controlType == 4, param.authoredValueRaw == "false",
+               Self.lumetriSectionToggleIDs.contains(param.parameterID),
+               param.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                continue
+            }
             // Lumetri : seulement les curseurs (ct 8) et les cases d'activation (ct 4),
             // jamais Color Space ni les menus LUT/Look, ni les paramètres sans nom (cachés).
             if isLumetri {
@@ -116,8 +182,20 @@ enum IndexStore {
                       !lumetriSkippedParameterIDs.contains(param.parameterID),
                       !param.name.trimmingCharacters(in: .whitespaces).isEmpty else { total -= 1; continue }
             }
-            if param.isTimeVarying {
-                guard !param.keyframes.isEmpty else { continue }
+            // 2026-10-09 (audit A3#5) : chrono activé SANS aucune image-clé dans le fichier
+            // (Finzar « Transform 3 à 7 », 4 presets d'Isma) → la valeur fixe est celle du
+            // preset : chemin statique ci-dessous. Avant : `continue` → réglage compté mais
+            // jamais posé, faux badge « partiel », et une valeur fixe non par défaut (Échelle
+            // 150 chrono allumé) aurait été perdue en silence. Des images-clés présentes mais
+            // illisibles restent non posées (badge « partiel »).
+            if param.isTimeVarying, !(param.keyframes.isEmpty && param.rawKeyframeCount == 0) {
+                // 2026-10-09 (audit A3#10, I-09) : une image-clé écartée par le parseur
+                // (illisible, non finie, temps hors limites) ferait poser une animation
+                // TRONQUÉE sans le dire → réglage non posé (badge « partiel »). Couleur
+                // animée (ct 5) : l'entier 64 bits de la couleur était lu comme un nombre et
+                // envoyé tel quel au plugin → non posée non plus.
+                guard !param.keyframes.isEmpty, param.keyframes.count >= param.rawKeyframeCount,
+                      param.controlType != 5 else { continue }
                 planParams.append(.init(
                     index: param.index, name: param.name, number: nil, bool: nil,
                     keyframes: param.keyframes.map {
@@ -129,9 +207,12 @@ enum IndexStore {
                 compiled += 1
                 continue
             }
+            // 2026-10-09 (I-09) : valeurs non finies (« nan », « inf », « 1e400 ») écartées —
+            // JSONEncoder refuse NaN : le snapshot n'était plus écrit et l'application
+            // finissait en « Couldn't apply the effect ». Réglage non posé, badge « partiel ».
             if param.controlType == 6 {
                 let parts = param.authoredValueRaw.split(separator: ":")
-                if parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) {
+                if parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]), x.isFinite, y.isFinite {
                     planParams.append(.init(index: param.index, name: param.name,
                                             number: nil, bool: nil, point: .init(x: x, y: y)))
                     compiled += 1
@@ -150,7 +231,7 @@ enum IndexStore {
                 planParams.append(.init(index: param.index, name: param.name,
                                         number: nil, bool: param.authoredValueRaw == "true"))
                 compiled += 1
-            } else if let number = Double(param.authoredValueRaw) {
+            } else if let number = Double(param.authoredValueRaw), number.isFinite {
                 planParams.append(.init(index: param.index, name: param.name,
                                         number: number, bool: nil))
                 compiled += 1
@@ -181,7 +262,12 @@ enum IndexStore {
     /// Même logique que `presetItems`, exposée pour le diagnostic `index-excluded`.
     static func exclusionReason(_ preset: ParsedPreset, addable: Set<String>) -> String? {
         let videoEffects = preset.effects.filter { $0.kind == "video" }
-        if videoEffects.isEmpty { return preset.effects.isEmpty ? "vide" : "audio seul" }
+        if videoEffects.isEmpty {
+            if preset.effects.isEmpty { return "vide" }
+            // 2026-10-09 (audit A3#10) : un effet sans composant lisible (ni vidéo ni audio)
+            // était annoncé « audio seul » dans index-preview / index-excluded.
+            return preset.effects.contains { $0.kind == "audio" } ? "audio seul" : "composant inconnu"
+        }
         if let reason = unreplayableReason(videoEffects) { return reason }
         let (resolved, _) = resolveAliases(videoEffects, addable: addable)
         let usable = resolved.contains { addable.contains($0.matchName) || intrinsicMatchNames.contains($0.matchName) }
@@ -210,6 +296,8 @@ enum IndexStore {
             let folder = preset.binPath.joined(separator: "/")
             let source = adobe ? L("Adobe preset") : L("Preset")
             var keywords = preset.binPath
+            // Dossier « Fav »… des favoris Premiere fusionnés dans ce preset (2026-10-09).
+            keywords.append(contentsOf: preset.extraKeywords)
             keywords.append(contentsOf: videoEffects.map(\.displayName))
             keywords.append(contentsOf: appendable.map(\.matchName))
 
@@ -238,7 +326,9 @@ enum IndexStore {
             if aliasedCount > 0 { hints.append("aliased:\(aliasedCount)") }
 
             return SearchItem(
-                id: "preset:\(preset.uid)",
+                // 2026-10-09 (audit A3#2) : les presets du bundle Adobe ont leur propre
+                // espace d'ids (« preset:adobe: ») ; les presets perso gardent « preset:<uid> ».
+                id: adobe ? "\(SearchItem.adobePresetPrefix)\(preset.uid)" : "preset:\(preset.uid)",
                 kind: "preset",
                 title: preset.name,
                 subtitle: folder.isEmpty ? source : "\(source) · \(folder)",
@@ -273,11 +363,33 @@ enum IndexStore {
     /// de la version de Premiere qui tourne (`hostVersion` du hello : 26.5.2 →
     /// « 26.0 ») en priorité, sinon le plus récent ; et dans ce dossier, le
     /// fichier modifié en dernier, celui que Premiere tient à jour.
+    /// Enveloppe gardée pour les modes CLI ; l'app passe par `userPresetLookup` (C-08).
     static func userPresetFile(hostVersion: String = "") -> URL? {
-        let fm = FileManager.default
-        let base = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if case .found(let url) = userPresetLookup(hostVersion: hostVersion) { return url }
+        return nil
+    }
+
+    /// 2026-10-09 (audit A2#4, A3#3, B4#1 ; contrat C-08) : `userPresetFile` renvoyait nil
+    /// en silence (`try?`) aussi bien quand le dossier n'existe pas que quand macOS REFUSE
+    /// l'accès à Documents — ce qui arrive après chaque mise à jour (nouvelle signature ad
+    /// hoc, AGENTS §5). L'app reconstruisait alors l'index sans les presets perso et
+    /// écrasait le snapshot. Désormais : `.accessDenied` (erreur 257 NSFileReadNoPermission,
+    /// ou POSIX EPERM/EACCES) est distinct de `.noFile` (dossier absent, aucun profil).
+    /// Mêmes règles de choix que `userPresetFile` (version qui tourne, puis fichier récent).
+    static func userPresetLookup(hostVersion: String = "") -> UserPresetLookup {
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Adobe/Premiere Pro")
-        guard let versions = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil) else { return nil }
+        return userPresetLookup(hostVersion: hostVersion, in: base)
+    }
+
+    /// Même recherche sous un dossier donné (tests hors Premiere).
+    static func userPresetLookup(hostVersion: String, in base: URL) -> UserPresetLookup {
+        let fm = FileManager.default
+        let versions: [URL]
+        do { versions = try fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil) }
+        catch {
+            return isPermissionError(error) ? .accessDenied(accessDescription(error, "Documents/Adobe/Premiere Pro")) : .noFile
+        }
         // Tri numérique décroissant ("26.0" > "25.0")
         var ordered = versions.sorted { $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedDescending }
         if let major = hostVersion.split(separator: ".").first.flatMap({ Int($0) }),
@@ -288,14 +400,51 @@ enum IndexStore {
             (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
         }
         for version in ordered {
-            guard let profiles = try? fm.contentsOfDirectory(at: version, includingPropertiesForKeys: nil) else { continue }
-            let files = profiles
-                .filter { $0.lastPathComponent.hasPrefix("Profile-") }
-                .map { $0.appendingPathComponent("Effect Presets and Custom Items.prfpset") }
-                .filter { fm.fileExists(atPath: $0.path) }
-            if let newest = files.max(by: { modified($0) < modified($1) }) { return newest }
+            let entries: [URL]
+            do { entries = try fm.contentsOfDirectory(at: version, includingPropertiesForKeys: nil) }
+            catch {
+                // Dossier de version prioritaire illisible : ne PAS se rabattre sur un
+                // profil plus ancien (on indexerait d'autres presets) — accès refusé.
+                if isPermissionError(error) {
+                    return .accessDenied(accessDescription(error, "dossier \(version.lastPathComponent)"))
+                }
+                continue   // simple fichier, dossier disparu…
+            }
+            var files: [URL] = []
+            var denied: Error?
+            for profile in entries where profile.lastPathComponent.hasPrefix("Profile-") {
+                let file = profile.appendingPathComponent("Effect Presets and Custom Items.prfpset")
+                do {
+                    _ = try fm.attributesOfItem(atPath: file.path)
+                    files.append(file)
+                } catch {
+                    if isPermissionError(error) { denied = error }
+                }
+            }
+            if let newest = files.max(by: { modified($0) < modified($1) }) { return .found(newest) }
+            // Nom du profil MASQUÉ : il contient souvent le prénom (le journal se partage).
+            if let denied { return .accessDenied(accessDescription(denied, "profil Profile-… (\(version.lastPathComponent))")) }
         }
-        return nil
+        return .noFile
+    }
+
+    /// Refus d'accès (TCC ou droits Unix), y compris en erreur sous-jacente.
+    static func isPermissionError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain, ns.code == NSFileReadNoPermissionError { return true }
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(EPERM) || ns.code == Int(EACCES) { return true }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isPermissionError(underlying) }
+        return false
+    }
+
+    /// « <où> : Cocoa 257 / POSIX 1 » — jamais le chemin complet (nom d'utilisateur).
+    private static func accessDescription(_ error: Error, _ place: String) -> String {
+        let ns = error as NSError
+        var codes = "\(ns.domain == NSCocoaErrorDomain ? "Cocoa" : ns.domain) \(ns.code)"
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            codes += " / \(underlying.domain == NSPOSIXErrorDomain ? "POSIX" : underlying.domain) \(underlying.code)"
+        }
+        return "\(place) : \(codes)"
     }
 
     /// Presets Adobe du bundle. Version ET langue résolues dynamiquement
@@ -369,5 +518,39 @@ enum IndexStore {
         guard let snapshot = try? decoder.decode(IndexSnapshot.self, from: data),
               snapshot.version == IndexSnapshot.currentVersion else { return nil }
         return snapshot
+    }
+
+    /// Effets d'un snapshot de N'IMPORTE QUELLE version, v6 compris (intégration du
+    /// 2026-10-09). Le passage au snapshot v7 (ids des presets, I-02) fait ignorer
+    /// l'ancien : sans lui, la palette restait vide au premier lancement de la nouvelle
+    /// version tant que Premiere n'avait pas dit hello. Les EFFETS, eux, ne dépendent pas
+    /// des ids : on ne lit que `kind`, `title` et le matchName de la 1ʳᵉ opération (même
+    /// règle que l'effectsCache de l'app et `index-preview`). nil : pas de fichier,
+    /// illisible, ou aucun effet.
+    static func loadSnapshotEffects() -> (premiereVersion: String, version: Int, effects: [EffectEntry])? {
+        guard let data = try? Data(contentsOf: snapshotURL) else { return nil }
+        return snapshotEffects(from: data)
+    }
+
+    static func snapshotEffects(from data: Data) -> (premiereVersion: String, version: Int, effects: [EffectEntry])? {
+        struct AnyVersion: Decodable {
+            struct Item: Decodable {
+                struct Plan: Decodable {
+                    struct Operation: Decodable { let matchName: String }
+                    let operations: [Operation]
+                }
+                let kind: String
+                let title: String
+                let plan: Plan
+            }
+            let version: Int
+            let premiereVersion: String
+            let items: [Item]
+        }
+        guard let snapshot = try? JSONDecoder().decode(AnyVersion.self, from: data) else { return nil }
+        let effects = snapshot.items.filter { $0.kind == "effect" }.compactMap { item in
+            item.plan.operations.first.map { EffectEntry(matchName: $0.matchName, displayName: item.title) }
+        }
+        return effects.isEmpty ? nil : (snapshot.premiereVersion, snapshot.version, effects)
     }
 }

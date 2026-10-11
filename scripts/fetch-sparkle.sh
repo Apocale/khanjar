@@ -18,7 +18,8 @@ URL="https://github.com/sparkle-project/Sparkle/releases/download/$VERSION/Spark
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/helper/Vendor"
 MARKER="$VENDOR/.sparkle-version"
-[[ -f "$MARKER" && "$(cat "$MARKER")" == "$VERSION" && -d "$VENDOR/Sparkle.xcframework" ]] && exit 0
+# Sparkle-LICENSE fait partie du contrat : build-app.sh la livre dans l'app (2026-10-08).
+[[ -f "$MARKER" && "$(cat "$MARKER")" == "$VERSION" && -d "$VENDOR/Sparkle.xcframework" && -f "$VENDOR/Sparkle-LICENSE" ]] && exit 0
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

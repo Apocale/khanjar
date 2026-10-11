@@ -59,10 +59,27 @@ final class HotkeyService {
         let status = RegisterEventHotKey(entry.keyCode, entry.modifiers, hotKeyID, GetEventDispatcherTarget(), 0, &ref)
         guard status == noErr, let ref else {
             log.error("RegisterEventHotKey #\(id) en échec (status \(status)) — raccourci déjà pris ?")
+            // 2026-10-09 (audit A4#7) : cet échec n'était que journalisé. Le HUD de
+            // l'app n'apparaissait que si Premiere était au premier plan au moment de
+            // l'enregistrement — jamais le cas depuis les Réglages : le raccourci ne
+            // marchait pas, sans un mot. Prévenu une fois par inscription et par session
+            // (pas à chaque retour dans Premiere).
+            if Self.isFirstFailure(id: id, keyCode: entry.keyCode, modifiers: entry.modifiers, reported: &reportedFailures) {
+                HUD.show(L("Khanjar: one of your shortcuts is already used by another app — change it in Settings"),
+                         style: .warning)
+            }
             return false
         }
         armed[id] = ref
         return true
+    }
+
+    /// Inscriptions déjà signalées en échec pendant cette session (id + combinaison).
+    private var reportedFailures: Set<String> = []
+
+    /// Vrai au PREMIER échec d'une inscription (même id, même combinaison) dans la session.
+    static func isFirstFailure(id: UInt32, keyCode: UInt32, modifiers: UInt32, reported: inout Set<String>) -> Bool {
+        reported.insert("\(id):\(keyCode):\(modifiers)").inserted
     }
 
     private func disarm(_ id: UInt32) {
@@ -78,7 +95,9 @@ final class HotkeyService {
             guard let self else { return }
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             if Self.premiereIsFrontmost(app) {
-                self.wanted.keys.forEach { self.arm($0) }
+                // Ordre fixe (palette, calque, puis presets) : avant, l'ordre d'un
+                // dictionnaire, qui change d'un lancement à l'autre (audit A4#7).
+                self.wanted.keys.sorted().forEach { self.arm($0) }
             } else if !self.armed.isEmpty {
                 self.armed.keys.forEach { self.disarm($0) }
             }

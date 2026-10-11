@@ -4,14 +4,23 @@
  *  - target "selection" uniquement — jamais de repli sur un clip non sélectionné ;
  *  - toute la préparation (créations de composants) est asynchrone et se fait
  *    AVANT la transaction (le callback d'executeTransaction est synchrone) ;
- *  - une seule transaction nommée plan.label couvrant tous les clips ; si elle
- *    échoue, repli automatique en transactions par-clip (même nom), signalé
- *    par result.transaction = "per-clip" ;
+ *  - transactions nommées plan.label, chacune couvrant TOUS les clips
+ *    (2026-10-09, audit P-02 — avant : une ou deux PAR CLIP pour les réglages) :
+ *      1. insertion des effets (absente pour un preset 100 % intrinsèque),
+ *      2. réglages (valeurs et keyframes, effets ajoutés ET intrinsèques),
+ *      3. modes d'interpolation, seulement s'il reste des keyframes HOLD ou
+ *         bézier non cuits (AGENTS §3.1 item 5 : deux transactions obligatoires).
+ *    Soit 1 ⌘Z pour un effet nu, 2 pour un preset réglé, 3 au plus, quel que
+ *    soit le nombre de clips — un SEUL ⌘Z est impossible : un effet n'expose
+ *    ses paramètres qu'une fois posé. Si une transaction groupée échoue, repli
+ *    automatique clip par clip (même nom), signalé par
+ *    result.transaction = "per-clip" ; fidelity.transactions = nombre de
+ *    transactions réussies ;
  *  - un composant ne sert qu'une fois : une instance par (clip × opération).
  */
 const { ppro, requireProject, requireSequence, selectionItems } = require("./context");
 const { CmdError, CODES } = require("./errors");
-const { bakeParam, TPS: TPS_APPLY } = require("./ease");
+const { bakeParam, plainKeyframes, TPS: TPS_APPLY } = require("./ease");
 
 /* Partitionne les opérations en (applicables, manquantes) contre l'inventaire
  * réel : les matchNames non ajoutables (intrinsèques type AE.ADBE Motion,
@@ -225,8 +234,11 @@ function sameParamName(a, b) {
  * Échelle et rotation se reconnaissent à leur NOM, dans les 10 langues de
  * Premiere (relevées dans les presets Adobe localisés, Motion index 1/2/4), et
  * sur le nom du preset comme sur celui du Premiere qui applique : un preset
- * allemand dans un Premiere allemand restait sinon en valeurs absolues. */
-const SCALE_RE = /scale|echelle|échelle|skalier|escala|scala|dimensionar|zoom|taille|スケール|비율|масштаб|缩放/i;
+ * allemand dans un Premiere allemand restait sinon en valeurs absolues.
+ * 2026-10-09 (audit P-01, B2#9) : « масш » ajouté — le Premiere russe abrège
+ * « Масш. ширину / высоту » (largeur/hauteur d'échelle), que « масштаб » ne
+ * reconnaissait pas. */
+const SCALE_RE = /scale|echelle|échelle|skalier|escala|scala|dimensionar|zoom|taille|スケール|비율|масштаб|масш|缩放/i;
 const ROTATION_RE = /rotat|rotac|rotaç|rotaz|dreh|回転|회전|поворот|旋转/i;
 
 function relativeKind(names, sample) {
@@ -245,35 +257,87 @@ function mapValue(v, kind, k) {
   return v + k; // delta
 }
 
+/* RÉFÉRENCE = VALEUR NEUTRE (2026-10-09, audit P-01 ; décision d'Isma Q1).
+ *
+ * CAUSE : la référence était la 1ʳᵉ valeur du PRESET (k = actuelle / preset,
+ * actuelle − preset). Une valeur FIXE redevenait donc toujours la valeur du
+ * clip — « PiP 25% » ne bougeait plus rien, un zoom fixe à 181 % disparaissait
+ * (les 38 PiP Adobe de toutes les palettes) — et une animation qui ARRIVE au
+ * repos était inversée : 110 → 100 devenait 100 → 90,9 ; échelle actuelle 0 →
+ * tout le preset à 0.
+ * CORRECTION : on transpose par rapport au NEUTRE du réglage — Échelle 100,
+ * Position et Point d'ancrage au centre (0,5 ; 0,5), Rotation 0 :
+ *   facteur k = actuelle / 100 ; décalage k = actuelle − centre ; delta k = actuelle,
+ * appliqué à toutes les valeurs du réglage, fixes comme keyframes. Un clip au
+ * cadrage normal reçoit exactement le preset (le natif) ; « zoom 100 → 120 »
+ * sur un clip réglé à 50 % donne toujours 50 → 60 (la demande d'août).
+ * Réglage rendu TEL QUEL si : lecture impossible ; réglage DÉJÀ animé sur le
+ * clip (isTimeVarying si l'API l'expose, sinon valeur à l'in-point ≠ valeur à
+ * la fin du clip ; invérifiable = on n'y touche pas) ; k neutre, non fini, ou
+ * ≤ 0 pour un facteur. Lectures async faites AVANT le verrou (appelant), seuls
+ * des nombres sont gardés (AGENTS §3.1 items 1-2). */
+const NEUTRAL_SCALE = 100;
+const NEUTRAL_POINT = { x: 0.5, y: 0.5 };
+// Garde-fou d'unités : Premiere rend les positions NORMALISÉES (0-1 à l'écran,
+// relu sur Transform par anchor-test). Une lecture hors de [-10, 10] serait en
+// pixels (non observé) : la transposer projetterait le clip hors cadre.
+const MAX_NORMALIZED = 10;
+
+function unwrapValue(v) {
+  for (let u = 0; u < 3 && v && typeof v === "object" && "value" in v; u++) v = v.value;
+  return v;
+}
+
+function sameReading(a, b) {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a));
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    return Math.abs(a.x - b.x) <= 1e-9 && Math.abs(a.y - b.y) <= 1e-9;
+  }
+  return false;
+}
+
 /* Lit la valeur courante du paramètre sur le clip et transpose le preset.
- * Retourne le paramètre inchangé si la lecture échoue ou si rien à ajuster. */
-async function adjustParamToClip(component, p, timeCtx) {
+ * `getParam(index)` relit le paramètre depuis la chaîne à chaque lecture.
+ * Retourne le paramètre inchangé si rien n'est à ajuster (voir ci-dessus). */
+async function adjustParamToClip(getParam, p, timeCtx) {
   const sample = (p.keyframes && p.keyframes.length > 0) ? p.keyframes[0].value : p.value;
   if (sample == null) return p;
   let kind = null;
   let current;
   try {
-    const cp = component.getParam(p.index);
+    const cp = getParam(p.index);
     kind = relativeKind([p.name, cp && cp.displayName], sample);
     if (!kind) return p;
-    const at = ppro.TickTime.createWithTicks(String(Math.round(timeCtx.inTicks || 0)));
-    let v = await cp.getValueAtTime(at);
-    for (let u = 0; u < 3 && v && typeof v === "object" && "value" in v; u++) v = v.value;
-    current = v;
+    let varying = null; // null = API absente : on compare début et fin du clip
+    if (typeof cp.isTimeVarying === "function") {
+      try { varying = !!(await cp.isTimeVarying()); } catch (e) { varying = null; }
+    }
+    if (varying === true) return p;
+    const inKnown = timeCtx.inKnown !== false;
+    const at = (ticks) => ppro.TickTime.createWithTicks(String(Math.round(ticks)));
+    current = unwrapValue(await getParam(p.index).getValueAtTime(at(inKnown ? timeCtx.inTicks || 0 : 0)));
+    if (varying === null) {
+      if (!inKnown || !(timeCtx.durTicks > 0)) return p; // invérifiable : on n'y touche pas
+      const end = timeCtx.inTicks + timeCtx.durTicks - 1;
+      const atEnd = unwrapValue(await getParam(p.index).getValueAtTime(at(end)));
+      if (!sameReading(current, atEnd)) return p; // déjà animé sur le clip
+    }
   } catch (e) { return p; }
 
   let k;
   if (kind === "offset") {
-    if (!current || typeof current !== "object" || !("x" in current)) return p;
-    k = { x: current.x - sample.x, y: current.y - sample.y };
+    if (!current || typeof current !== "object") return p;
+    const x = Number(current.x), y = Number(current.y);
+    if (!isFinite(x) || !isFinite(y) || Math.abs(x) > MAX_NORMALIZED || Math.abs(y) > MAX_NORMALIZED) return p;
+    k = { x: x - NEUTRAL_POINT.x, y: y - NEUTRAL_POINT.y };
     if (Math.abs(k.x) < 1e-9 && Math.abs(k.y) < 1e-9) return p;
   } else if (kind === "factor") {
-    if (typeof current !== "number" || Math.abs(sample) < 1e-6) return p;
-    k = current / sample;
-    if (!isFinite(k) || Math.abs(k - 1) < 1e-9) return p;
+    if (typeof current !== "number" || !isFinite(current)) return p;
+    k = current / NEUTRAL_SCALE;
+    if (!isFinite(k) || k <= 0 || Math.abs(k - 1) < 1e-9) return p;
   } else {
-    if (typeof current !== "number") return p;
-    k = current - sample;
+    if (typeof current !== "number" || !isFinite(current)) return p;
+    k = current; // neutre 0
     if (Math.abs(k) < 1e-9) return p;
   }
 
@@ -293,7 +357,11 @@ async function adjustParamToClip(component, p, timeCtx) {
  *   2 = Sortie  : in + durClip − (durSource − t)  — collé à la fin du clip
  * t = offset depuis AnchorInPoint (ticks). timeCtx = {inTicks, durTicks} du
  * clip cible ; anchor = {type, srcDur} de l'opération. Précision : les ticks
- * (~9e14) restent < 2^53, exacts en Number. */
+ * (~9e14) restent < 2^53, exacts en Number.
+ * 2026-10-09 (audit P-10) : plus de clamp à l'in-point pour l'ancrage Sortie
+ * (AGENTS §3.2 0ter : offsets signés, ne jamais clamper). Les keyframes
+ * tombés avant l'in-point sont remplacés ensuite par UN keyframe à l'in-point
+ * portant la valeur de la courbe (ease.js, fitToClip). */
 function keyframeTicks(t, anchor, timeCtx) {
   const srcDur = Number(anchor && anchor.srcDur) || 0;
   const type = anchor ? anchor.type : 1;
@@ -301,7 +369,7 @@ function keyframeTicks(t, anchor, timeCtx) {
     return timeCtx.inTicks + t * (timeCtx.durTicks / srcDur);
   }
   if (type === 2 && srcDur > 0 && timeCtx.durTicks > 0) {
-    return Math.max(timeCtx.inTicks, timeCtx.inTicks + timeCtx.durTicks - (srcDur - t));
+    return timeCtx.inTicks + timeCtx.durTicks - (srcDur - t);
   }
   return timeCtx.inTicks + t; // type 1 (ou repli)
 }
@@ -317,11 +385,27 @@ function keyframeTicks(t, anchor, timeCtx) {
  * sabliers). On ne peut pas cibler par le temps un keyframe qui n'existe pas
  * encore au moment où l'action est créée. L'échantillon officiel Adobe
  * (uxp-premiere-pro-samples, keyframe.ts) fait bien DEUX executeTransaction
- * sous un même lockedAccess. */
-function buildParamActions(component, params, fidelity, timeCtx, anchor, timebase, expectedCount) {
+ * sous un même lockedAccess.
+ *
+ * COMPTAGE (2026-10-09, audit P-06) : `paramsSet` était incrémenté ICI, à la
+ * construction, avant l'exécution — une transaction refusée laissait les
+ * effets aux valeurs par défaut avec un HUD vert « 27 réglages ». Désormais
+ * chaque réglage est construit dans un tableau LOCAL, versé dans `actions`
+ * seulement s'il est complet (un keyframe qui lève au milieu ne laisse plus
+ * une animation à moitié posée), et la fonction RENVOIE `built`, le nombre de
+ * réglages construits : l'appelant ne les compte posés qu'après une
+ * transaction réussie. Les réglages sautés restent comptés ici.
+ *
+ * PLAFOND (2026-10-09, audit P-09) : `budget` = { used, max } partagé par tous
+ * les réglages d'UN clip. Un réglage dont les actions (keyframes + modes)
+ * feraient dépasser `max` est sauté (TOO_MANY_KEYFRAMES, compté dans
+ * paramsSkipped → HUD orange) au lieu de figer Premiere dans une transaction
+ * synchrone géante. Le coût est calculé AVANT de créer la moindre action. */
+function buildParamActions(component, params, fidelity, timeCtx, anchor, timebase, expectedCount, budget) {
   const actions = [];
   const interpolations = [];
-  if (!params || params.length === 0) return { actions, interpolations };
+  let built = 0;
+  if (!params || params.length === 0) return { actions, interpolations, built };
   const KF = ppro.Keyframe || {};
   const LINEAR = KF.INTERPOLATION_MODE_LINEAR != null ? KF.INTERPOLATION_MODE_LINEAR : null;
   const BEZIER = KF.INTERPOLATION_MODE_BEZIER != null ? KF.INTERPOLATION_MODE_BEZIER : LINEAR;
@@ -335,7 +419,7 @@ function buildParamActions(component, params, fidelity, timeCtx, anchor, timebas
   try { count = component.getParamCount(); } catch (err) {
     fidelity.paramsSkipped += params.length;
     fidelity.detail.push({ reason: "PRE_INSERT_PARAMS_UNSUPPORTED", message: err.message });
-    return { actions, interpolations };
+    return { actions, interpolations, built };
   }
   // GARDE-FOU ANTI-CORRUPTION : un preset désigne ses paramètres par INDEX. Si
   // l'effet installé ici n'a pas le même nombre de paramètres qu'à
@@ -353,6 +437,9 @@ function buildParamActions(component, params, fidelity, timeCtx, anchor, timebas
     fidelity.detail.push({ reason: "PARAM_STRUCTURE_MISMATCH", expected: expectedCount, live: count });
   }
   for (const p of params) {
+    const local = [];        // actions de CE réglage (versées seulement s'il est complet)
+    const localInterp = [];  // son programme d'interpolation
+    let isBaked = false;
     try {
       if (p.index < 0 || p.index >= count) {
         fidelity.paramsSkipped += 1;
@@ -389,43 +476,60 @@ function buildParamActions(component, params, fidelity, timeCtx, anchor, timebas
       // (champ i : 0=linéaire, 5=bézier — 84 % des keyframes réels sont
       // bézier ; les forcer en linéaire changeait le « feel » vs natif).
       if (p.keyframes && p.keyframes.length > 0) {
-        actions.push(cp.createSetTimeVaryingAction(true));
         const mapTick = (offset) => keyframeTicks(offset, anchor, timeCtx);
         // CUISSON : si le preset porte de l'ease, on trace la courbe native en
         // keyframes LINÉAIRES denses (le mode bézier seul ne courbe rien — cf.
         // AGENTS.md §3.1). Sinon, tracé keyframe-par-keyframe avec le mode stocké.
+        // Dans les deux cas : coupé à l'in-point et limité à la partie visible
+        // du clip au-delà de 400 points (P-09/P-10, ease.js).
         const baked = bakeParam(p.keyframes, mapTick, timebase, timeCtx);
-        if (baked.baked) {
-          for (const pt of baked.points) {
-            const keyframe = cp.createKeyframe(toNativeValue(pt.value));
-            keyframe.position = ppro.TickTime.createWithTicks(String(pt.ticks));
-            actions.push(cp.createAddKeyframeAction(keyframe));
-            // Keyframes linéaires (défaut) : aucune action d'interpolation.
-          }
-          fidelity.paramsSet += 1;
-          fidelity.baked = (fidelity.baked || 0) + 1;
+        const points = baked.baked ? baked.points : plainKeyframes(p.keyframes, mapTick, timebase, timeCtx).points;
+        // 2026-10-09 (audit P-02) : plus d'action d'interpolation pour un
+        // keyframe LINÉAIRE — c'est le mode d'un keyframe neuf (AGENTS §3.1
+        // item 5). Seuls HOLD et bézier ont besoin de la transaction 2 ; un
+        // preset linéaire ne coûte donc plus de ⌘Z supplémentaire. Les points
+        // cuits sont tous linéaires.
+        const modeOf = (pt) => {
+          if (baked.baked || pt.mode === 0) return null;
+          const mode = mapMode(pt.mode);
+          return mode != null && mode !== LINEAR ? mode : null;
+        };
+        const cost = 1 + points.length + points.filter((pt) => modeOf(pt) != null).length;
+        if (budget && budget.used + cost > budget.max) {
+          fidelity.paramsSkipped += 1;
+          fidelity.detail.push({ param: p.name, reason: "TOO_MANY_KEYFRAMES", actions: cost, limit: budget.max });
           continue;
         }
-        for (const k of p.keyframes) {
-          const keyframe = cp.createKeyframe(toNativeValue(k.value));
-          const ticks = Math.round(keyframeTicks(Number(k.t), anchor, timeCtx));
-          keyframe.position = ppro.TickTime.createWithTicks(String(ticks));
-          actions.push(cp.createAddKeyframeAction(keyframe));
-          const mode = mapMode(k.i);
-          if (mode != null) interpolations.push({ paramIndex: p.index, ticks, mode });
+        local.push(cp.createSetTimeVaryingAction(true));
+        for (const pt of points) {
+          const keyframe = cp.createKeyframe(toNativeValue(pt.value));
+          keyframe.position = ppro.TickTime.createWithTicks(String(pt.ticks));
+          local.push(cp.createAddKeyframeAction(keyframe));
+          const mode = modeOf(pt);
+          if (mode != null) localInterp.push({ paramIndex: p.index, ticks: pt.ticks, mode });
         }
-        fidelity.paramsSet += 1;
-        continue;
+        isBaked = baked.baked;
+      } else {
+        if (budget && budget.used + 1 > budget.max) {
+          fidelity.paramsSkipped += 1;
+          fidelity.detail.push({ param: p.name, reason: "TOO_MANY_KEYFRAMES", actions: 1, limit: budget.max });
+          continue;
+        }
+        const keyframe = cp.createKeyframe(toNativeValue(p.value));
+        local.push(cp.createSetValueAction(keyframe, true));
       }
-      const keyframe = cp.createKeyframe(toNativeValue(p.value));
-      actions.push(cp.createSetValueAction(keyframe, true));
-      fidelity.paramsSet += 1;
     } catch (err) {
       fidelity.paramsSkipped += 1;
       fidelity.detail.push({ param: p.name, reason: "VALUE_REJECTED", message: err.message });
+      continue; // rien de ce réglage n'entre dans la transaction
     }
+    for (const action of local) actions.push(action);
+    for (const it of localInterp) interpolations.push(it);
+    if (budget) budget.used += local.length + localInterp.length;
+    if (isBaked) fidelity.baked = (fidelity.baked || 0) + 1;
+    built += 1;
   }
-  return { actions, interpolations };
+  return { actions, interpolations, built };
 }
 
 /* Transaction 2 : pose du mode d'interpolation sur des keyframes qui existent
@@ -481,161 +585,375 @@ async function prepareClip(item, operations, addable) {
   return { steps, insertIndex };
 }
 
-/* Après l'insertion : retrouve dans la chaîne relue le bloc des N composants
- * que nous venons de poser (par matchName, à partir de l'index d'insertion —
- * ils ne sont PLUS en queue depuis qu'on insère en haut de pile), puis pose
- * les valeurs dans une seconde transaction (même libellé). */
-async function applyParamsPostInsert(project, clips, operations, fidelity, label, timebase) {
-  const wantParams = operations.some((op) => op.params && op.params.length > 0);
-  if (!wantParams) return;
+/* ── POSE DES RÉGLAGES : UNE transaction pour TOUS les clips ─────────────
+ * (2026-10-09, audit P-02 + P-06 ; décision d'Isma Q2).
+ *
+ * CAUSE : seule l'insertion était groupée. Les réglages des effets ajoutés
+ * (applyParamsPostInsert) puis ceux des intrinsèques (applyExistingOps)
+ * passaient chacun par une transaction PAR CLIP, plus une d'interpolation :
+ * « 3 effets réglés » sur 3 clips = 4 ⌘Z, sur 500 = 501. Premiere n'en garde
+ * que 32 (préférence relevée chez Isma) : le 1ᵉʳ ⌘Z laissait les effets aux
+ * valeurs par défaut et, au-delà de 16 à 32 clips, l'ajout lui-même n'était
+ * plus annulable. Et le booléen d'executeTransaction n'était pas lu : une
+ * transaction refusée était annoncée « tout posé » (HUD vert, rien au journal).
+ *
+ * CORRECTION, en une seule passe pour les effets ajoutés ET les intrinsèques :
+ *  a. lectures async hors verrou, clip par clip : in/out, noms de la chaîne,
+ *     index des composants, adaptation au cadrage — rien que des nombres et des
+ *     chaînes (AGENTS §3.1 items 1-2) ;
+ *  b. juste avant le verrou, chaînes de TOUS les clips relues à la suite, sans
+ *     autre await (même motif que l'insertion groupée, éprouvée sur 783 clips) ;
+ *  c. UN lockedAccess : T1 = réglages de tous les clips, actions créées DANS le
+ *     callback, un try/catch PAR CLIP (objet périmé → ce clip est repris seul,
+ *     aucune de ses actions n'entre dans T1) ; T2 = interpolations HOLD/bézier
+ *     des clips réussis, seulement s'il en reste ;
+ *  d. clips à reprendre, ou T1 refusée : repli clip par clip (idempotent :
+ *     même valeur, keyframe au même temps) ;
+ *  e. `paramsSet` compté seulement après une transaction réussie ; sinon les
+ *     réglages vont dans `paramsSkipped`, le clip dans
+ *     `fidelity.paramsFailedClips`, raison PARAMS_NOT_SET (contrat §4.1).
+ * Risque connu (à valider par T-01/T-06 dans Premiere) : une chaîne périmée
+ * dans la transaction groupée — couverte par le try/catch par clip et le repli. */
 
-  for (const clip of clips) {
-    // Lectures async AVANT le verrou (in-point d'abord, chaîne en dernier =
-    // objet le plus « frais » pour l'usage synchrone qui suit).
-    let timeCtx = { inTicks: 0, durTicks: 0 };
-    let chain = null;
-    const names = [];
-    try {
-      try {
-        const ip = await clip.item.getInPoint();
-        const op = await clip.item.getOutPoint();
-        timeCtx = { inTicks: ip.ticksNumber, durTicks: Math.max(0, op.ticksNumber - ip.ticksNumber) };
-      } catch (e) { /* contexte temporel indisponible : offsets relatifs */ }
-      const scan = await clip.item.getComponentChain();
-      const total = scan.getComponentCount();
-      for (let i = 0; i < total; i++) names.push(await scan.getComponentAtIndex(i).getMatchName());
-      chain = await clip.item.getComponentChain();
-    } catch (err) {
-      fidelity.detail.push({ reason: "POST_INSERT_READBACK_FAILED", message: err.message });
-      continue;
-    }
-    const base = locateInserted(names, operations, clip.insertIndex);
-    if (base < 0) {
-      fidelity.detail.push({ reason: "INSERTED_RUN_NOT_FOUND", clip: clip.name });
-      continue;
-    }
-    // CRITIQUE (26.3) : les actions de paramètres (createKeyframe /
-    // createSetValueAction…) doivent être créées À L'INTÉRIEUR du callback
-    // executeTransaction, pas avant — sinon « The script object is no longer
-    // valid » (constaté 2026-07-19, 17/24 params rejetés à l'échelle).
-    try {
-      const program = []; // { componentIndex, interpolations } — nombres seuls
-      project.lockedAccess(() => {
-        project.executeTransaction((compoundAction) => {
-          for (let k = 0; k < operations.length; k++) {
-            const op = operations[k];
-            if (!op.params || op.params.length === 0) continue;
-            const componentIndex = base + k;
-            const component = chain.getComponentAtIndex(componentIndex);
-            const built = buildParamActions(component, op.params, fidelity, timeCtx, op.anchor, timebase, op.paramCount);
-            for (const action of built.actions) compoundAction.addAction(action);
-            if (built.interpolations.length > 0) {
-              program.push({ componentIndex, interpolations: built.interpolations });
-            }
-          }
-        }, label);
-        // Transaction 2 : les keyframes existent maintenant → le mode se pose.
-        if (program.length > 0) {
-          project.executeTransaction((compoundAction) => {
-            for (const entry of program) {
-              const component = chain.getComponentAtIndex(entry.componentIndex);
-              for (const action of buildInterpolationActions(component, entry.interpolations, fidelity)) {
-                compoundAction.addAction(action);
-              }
-            }
-          }, label);
-        }
-      });
-    } catch (err) {
-      fidelity.detail.push({ reason: "PARAM_TRANSACTION_FAILED", message: err.message });
-    }
+/* Temps d'un TickTime en nombre (ticksNumber, sinon la chaîne ticks) ; null si
+ * illisible. */
+function ticksOf(time) {
+  if (time == null) return null;
+  let n = Number(time.ticksNumber);
+  if (!isFinite(n)) n = Number(time.ticks);
+  return isFinite(n) ? n : null;
+}
+
+function paramCountOf(ops) {
+  let n = 0;
+  for (const op of ops || []) n += op && op.params ? op.params.length : 0;
+  return n;
+}
+
+function isAnimated(p) {
+  return !!(p && Array.isArray(p.keyframes) && p.keyframes.length > 0);
+}
+
+/* Noms (matchNames) de la chaîne d'un clip, relus dans l'ordre. */
+async function readChainNames(item) {
+  const chain = await item.getComponentChain();
+  if (!chain) throw new Error("chaîne d'effets absente");
+  const total = chain.getComponentCount();
+  const names = [];
+  for (let i = 0; i < total; i++) names.push(await chain.getComponentAtIndex(i).getMatchName());
+  return names;
+}
+
+/* Fidélité locale à UN clip : versée dans le rapport global une fois le sort du
+ * clip connu, pour ne jamais compter deux fois un clip repris seul. */
+function clipFidelity() {
+  return { paramsSkipped: 0, detail: [], namesDiffer: 0, baked: 0, interpSkipped: 0 };
+}
+
+function mergeFidelity(into, from) {
+  into.paramsSkipped += from.paramsSkipped;
+  if (from.namesDiffer) into.namesDiffer = (into.namesDiffer || 0) + from.namesDiffer;
+  if (from.baked) into.baked = (into.baked || 0) + from.baked;
+  if (from.interpSkipped) into.interpSkipped = (into.interpSkipped || 0) + from.interpSkipped;
+  for (const d of from.detail) {
+    // Un seul exemple de « nom d'une autre langue » pour toute l'application.
+    if (d.reason === "NAME_DIFFERS_SAME_STRUCTURE" &&
+        into.detail.some((x) => x.reason === "NAME_DIFFERS_SAME_STRUCTURE")) continue;
+    into.detail.push(d);
   }
 }
 
-/* Effets INTRINSÈQUES du preset (Opacity, Motion…) : non ajoutables, déjà
- * présents sur chaque clip → on pose leurs params/keyframes sur le composant
- * EXISTANT, ciblé par matchName. Sans ça, le fondu/mouvement du preset est
- * perdu (« AP - SLIDE », « Blur Fade », etc.). */
-async function applyExistingOps(project, clips, existingOps, fidelity, label, timebase, relative) {
-  for (const clip of clips) {
-    let timeCtx = { inTicks: 0, durTicks: 0 };
-    let chain = null;
-    try {
-      try {
-        const ip = await clip.item.getInPoint();
-        const op = await clip.item.getOutPoint();
-        timeCtx = { inTicks: ip.ticksNumber, durTicks: Math.max(0, op.ticksNumber - ip.ticksNumber) };
-      } catch (e) { /* contexte temporel indisponible : offsets relatifs */ }
-      chain = await clip.item.getComponentChain();
-    } catch (err) {
-      fidelity.detail.push({ reason: "EXISTING_READBACK_FAILED", message: err.message });
-      continue;
+/* a. Lectures hors verrou pour un clip → { clip, timeCtx, jobs, paramTotal } ou
+ * null. Un job = un composant de la chaîne et les réglages à y poser. */
+async function readParamContext(clip, operations, existingOps, fidelity, relative, markParamsFailed) {
+  const item = clip.item;
+  let inTicks = null;
+  let durTicks = 0;
+  try { inTicks = ticksOf(await item.getInPoint()); } catch (e) { inTicks = null; }
+  try {
+    const out = ticksOf(await item.getOutPoint());
+    if (inTicks != null && out != null) durTicks = Math.max(0, out - inTicks);
+  } catch (e) { /* durée inconnue : les ancrages Échelle/Sortie retombent sur l'entrée */ }
+  const inKnown = inTicks != null;
+  const timeCtx = { inTicks: inKnown ? inTicks : 0, durTicks: inKnown ? durTicks : 0, inKnown };
+
+  let names = clip.names;
+  if (!names) {
+    try { names = await readChainNames(item); } catch (err) {
+      const lost = paramCountOf(operations) + paramCountOf(existingOps);
+      fidelity.paramsSkipped += lost;
+      markParamsFailed(clip);
+      fidelity.detail.push({ clip: clip.name, params: lost, message: err.message,
+        reason: operations.length > 0 ? "POST_INSERT_READBACK_FAILED" : "EXISTING_READBACK_FAILED" });
+      return null;
     }
-    // Carte matchName → index (uniquement des NOMBRES, pas d'objet stale).
+  }
+
+  const jobs = [];
+  if (operations.some((op) => op.params && op.params.length > 0)) {
+    // Bloc que NOUS venons d'insérer, retrouvé par suite de matchNames (il
+    // n'est plus en queue depuis qu'on insère en haut de pile).
+    const base = clip.base != null ? clip.base : locateInserted(names, operations, clip.insertIndex);
+    if (base < 0) {
+      const lost = paramCountOf(operations);
+      fidelity.paramsSkipped += lost;
+      markParamsFailed(clip);
+      fidelity.detail.push({ reason: "INSERTED_RUN_NOT_FOUND", clip: clip.name, params: lost });
+    } else {
+      operations.forEach((op, k) => {
+        if (op.params && op.params.length > 0) jobs.push({ componentIndex: base + k, op, params: op.params });
+      });
+    }
+  }
+  // Effets INTRINSÈQUES du preset (Opacity, Motion…) : non ajoutables, déjà
+  // présents sur chaque clip → réglages posés sur le composant EXISTANT, ciblé
+  // par matchName. Sans ça, le fondu/mouvement du preset serait perdu.
+  if (existingOps.length > 0) {
     const nameToIndex = {};
-    try {
-      const count = chain.getComponentCount();
-      for (let i = 0; i < count; i++) {
-        const mn = await chain.getComponentAtIndex(i).getMatchName();
-        if (nameToIndex[mn] === undefined) nameToIndex[mn] = i;
+    names.forEach((mn, i) => { if (nameToIndex[mn] === undefined) nameToIndex[mn] = i; });
+    for (const op of existingOps) {
+      if (!op.params || op.params.length === 0) continue;
+      const idx = nameToIndex[op.effect.matchName];
+      if (idx === undefined) {
+        // Ex. un preset Vector Motion sur un clip vidéo : réglages comptés
+        // sautés (avant : silence, HUD vert).
+        fidelity.paramsSkipped += op.params.length;
+        fidelity.detail.push({ effect: op.effect.matchName, reason: "INTRINSIC_NOT_ON_CLIP", clip: clip.name, params: op.params.length });
+        continue;
       }
-    } catch (err) {
-      fidelity.detail.push({ reason: "EXISTING_SCAN_FAILED", message: err.message });
-      continue;
+      jobs.push({ componentIndex: idx, op, params: op.params, intrinsic: true });
     }
-    // ADAPTATION AU CLIP : lectures ASYNC des valeurs courantes AVANT le verrou
-    // (rien d'asynchrone n'est permis dans la transaction). Ne produit que des
-    // nombres → aucun objet UXP ne traverse la frontière.
-    const tuned = {};
-    if (relative) {
-      for (const op of existingOps) {
-        const idx = nameToIndex[op.effect.matchName];
-        if (idx === undefined) continue;
+  }
+
+  // P-06 (2026-10-09) : in-point illisible → les keyframes partiraient de 0,
+  // soit une heure trop tôt sur un sous-titre. On ne pose pas les réglages
+  // ANIMÉS de ce clip ; les valeurs fixes, elles, ne dépendent pas du temps.
+  if (!inKnown) {
+    let dropped = 0;
+    for (const job of jobs) {
+      const keep = job.params.filter((p) => !isAnimated(p));
+      dropped += job.params.length - keep.length;
+      job.params = keep;
+    }
+    if (dropped > 0) {
+      fidelity.paramsSkipped += dropped;
+      fidelity.detail.push({ clip: clip.name, reason: "IN_POINT_UNREADABLE", params: dropped });
+    }
+  }
+
+  // ADAPTATION AU CLIP : lectures ASYNC des valeurs courantes AVANT le verrou
+  // (rien d'asynchrone n'est permis dans la transaction). Ne produit que des
+  // nombres → aucun objet UXP ne traverse la frontière.
+  if (relative && jobs.some((job) => job.intrinsic && job.params.length > 0)) {
+    let readChain = null;
+    try { readChain = await item.getComponentChain(); } catch (e) { readChain = null; }
+    if (readChain) {
+      for (const job of jobs) {
+        if (!job.intrinsic || job.params.length === 0) continue;
         try {
-          const comp = chain.getComponentAtIndex(idx);
+          // Composant et paramètre relus depuis la chaîne à chaque lecture.
+          const getParam = (index) => readChain.getComponentAtIndex(job.componentIndex).getParam(index);
           const out = [];
-          for (const p of op.params) out.push(await adjustParamToClip(comp, p, timeCtx));
-          tuned[op.effect.matchName] = out;
+          for (const p of job.params) out.push(await adjustParamToClip(getParam, p, timeCtx));
+          job.params = out;
         } catch (e) { /* lecture impossible : on garde les valeurs absolues */ }
       }
     }
-    // Chaîne fraîche pour l'usage synchrone dans la transaction.
-    let freshChain;
-    try { freshChain = await clip.item.getComponentChain(); } catch (e) { continue; }
-    try {
-      const program = [];
-      project.lockedAccess(() => {
-        project.executeTransaction((compoundAction) => {
-          for (const op of existingOps) {
-            const idx = nameToIndex[op.effect.matchName];
-            if (idx === undefined) {
-              fidelity.detail.push({ effect: op.effect.matchName, reason: "INTRINSIC_NOT_ON_CLIP" });
-              continue;
-            }
-            const component = freshChain.getComponentAtIndex(idx);
-            const params = tuned[op.effect.matchName] || op.params;
-            const built = buildParamActions(component, params, fidelity, timeCtx, op.anchor, timebase, op.paramCount);
-            for (const action of built.actions) compoundAction.addAction(action);
-            if (built.interpolations.length > 0) {
-              program.push({ componentIndex: idx, interpolations: built.interpolations });
-            }
-          }
-        }, label);
-        if (program.length > 0) {
-          project.executeTransaction((compoundAction) => {
-            for (const entry of program) {
-              const component = freshChain.getComponentAtIndex(entry.componentIndex);
-              for (const action of buildInterpolationActions(component, entry.interpolations, fidelity)) {
-                compoundAction.addAction(action);
-              }
-            }
-          }, label);
-        }
-      });
-    } catch (err) {
-      fidelity.detail.push({ reason: "EXISTING_TRANSACTION_FAILED", message: err.message });
+  }
+
+  const live = jobs.filter((job) => job.params.length > 0);
+  return { clip, timeCtx, jobs: live, paramTotal: paramCountOf(live.map((job) => ({ params: job.params }))) };
+}
+
+/* Plafond d'actions (keyframes + modes) par clip et par application (audit
+ * P-09, 2026-10-09) : au-delà, les réglages trop lourds sont sautés
+ * (TOO_MANY_KEYFRAMES) plutôt que de figer Premiere. */
+const MAX_ACTIONS_PER_CLIP = 2000;
+
+/* Actions de réglages d'UN clip, créées depuis `chain` (appelé DANS le callback
+ * d'executeTransaction). Lève si la chaîne est périmée : le clip sera repris
+ * seul. */
+function buildClipActions(ctx, chain, timebase) {
+  const fid = clipFidelity();
+  const budget = { used: 0, max: MAX_ACTIONS_PER_CLIP };
+  const actions = [];
+  const program = []; // { componentIndex, interpolations } — nombres seuls
+  let count = 0;
+  for (const job of ctx.jobs) {
+    const component = chain.getComponentAtIndex(job.componentIndex);
+    if (!component) throw new Error(`composant ${job.componentIndex} introuvable`);
+    const built = buildParamActions(component, job.params, fid, ctx.timeCtx, job.op.anchor, timebase, job.op.paramCount, budget);
+    for (const action of built.actions) actions.push(action);
+    count += built.built;
+    if (built.interpolations.length > 0) {
+      program.push({ componentIndex: job.componentIndex, interpolations: built.interpolations });
     }
   }
+  return { actions, program, count, fid };
+}
+
+/* Transaction 2 d'un clip : actions d'interpolation sur ses keyframes posés. */
+function buildClipInterpolations(program, chain, fid) {
+  const actions = [];
+  for (const entry of program) {
+    let component;
+    try { component = chain.getComponentAtIndex(entry.componentIndex); } catch (err) {
+      fid.interpSkipped += entry.interpolations.length;
+      fid.detail.push({ reason: "INTERP_REJECTED", message: err.message });
+      continue;
+    }
+    for (const action of buildInterpolationActions(component, entry.interpolations, fid)) actions.push(action);
+  }
+  return actions;
+}
+
+function interpolationCount(program) {
+  let n = 0;
+  for (const entry of program || []) n += entry.interpolations.length;
+  return n;
+}
+
+/* Rend true si Premiere a accepté la transaction. `false` = refusée, rien
+ * d'écrit (API UXP) ; une exception compte aussi comme un refus. */
+function accepted(result) {
+  return result !== false;
+}
+
+/* d. Repli : réglages d'UN clip, seul, avec une chaîne fraîche. */
+async function applyParamsAlone(project, ctx, fidelity, label, timebase, markParamsFailed) {
+  let ok = false;
+  let built = null;
+  let message = null;
+  let t2 = null;
+  const interpFid = clipFidelity();
+  try {
+    const chain = await ctx.clip.item.getComponentChain();
+    if (!chain) throw new Error("chaîne d'effets absente");
+    project.lockedAccess(() => {
+      ok = accepted(project.executeTransaction((compoundAction) => {
+        built = buildClipActions(ctx, chain, timebase);
+        for (const action of built.actions) compoundAction.addAction(action);
+      }, label));
+      if (!ok || built.program.length === 0) return;
+      try {
+        t2 = accepted(project.executeTransaction((compoundAction) => {
+          for (const action of buildClipInterpolations(built.program, chain, interpFid)) compoundAction.addAction(action);
+        }, label));
+      } catch (err) { t2 = false; interpFid.detail.push({ reason: "INTERP_REJECTED", message: err.message }); }
+    });
+  } catch (err) { message = err.message; }
+
+  if (ok && built) {
+    fidelity.transactions += 1;
+    mergeFidelity(fidelity, built.fid);
+    fidelity.paramsSet += built.count;
+    if (t2 === true) {
+      fidelity.transactions += 1;
+      mergeFidelity(fidelity, interpFid);
+    } else if (t2 === false) {
+      fidelity.interpSkipped = (fidelity.interpSkipped || 0) + interpolationCount(built.program);
+      fidelity.detail.push({ clip: ctx.clip.name, reason: "INTERP_REJECTED", message: "transaction d'interpolation refusée" });
+    }
+    return;
+  }
+  // Refusée ou en panne : aucun réglage de ce clip n'est écrit.
+  if (built) mergeFidelity(fidelity, built.fid); // réglages déjà sautés à la construction
+  const lost = built ? built.count : ctx.paramTotal;
+  fidelity.paramsSkipped += lost;
+  markParamsFailed(ctx.clip);
+  fidelity.detail.push({ clip: ctx.clip.name, reason: "PARAMS_NOT_SET", params: lost,
+    message: message || "transaction refusée par Premiere" });
+}
+
+/* Pose les réglages de tous les clips (voir l'en-tête de section). Rend
+ * { perClip } : true si au moins un clip est passé par le repli. */
+async function applyParams(project, clips, operations, existingOps, fidelity, label, timebase, relative) {
+  const report = { perClip: false };
+  if (paramCountOf(operations) + paramCountOf(existingOps) === 0) return report;
+
+  const failedOnce = new Set();
+  const markParamsFailed = (clip) => {
+    if (failedOnce.has(clip)) return;
+    failedOnce.add(clip);
+    fidelity.paramsFailedClips.push(clip.name);
+  };
+
+  // a. Lectures hors verrou.
+  const contexts = [];
+  for (const clip of clips) {
+    const ctx = await readParamContext(clip, operations, existingOps, fidelity, relative, markParamsFailed);
+    if (ctx && ctx.jobs.length > 0) contexts.push(ctx);
+  }
+  if (contexts.length === 0) return report;
+
+  // b. Chaînes de TOUS les clips relues à la suite, juste avant le verrou.
+  for (const ctx of contexts) {
+    try { ctx.chain = await ctx.clip.item.getComponentChain(); } catch (e) { ctx.chain = null; }
+  }
+
+  // c. UN verrou : T1 pour tous les clips, puis T2 s'il reste des interpolations.
+  const grouped = contexts.filter((ctx) => ctx.chain);
+  const retry = contexts.filter((ctx) => !ctx.chain);
+  const t2Batch = [];
+  const interpFid = clipFidelity();
+  let t1 = false;
+  let t2 = null;
+  let t2Message = null;
+  try {
+    project.lockedAccess(() => {
+      t1 = accepted(project.executeTransaction((compoundAction) => {
+        for (const ctx of grouped) {
+          try {
+            const built = buildClipActions(ctx, ctx.chain, timebase);
+            for (const action of built.actions) compoundAction.addAction(action);
+            ctx.built = built;
+          } catch (err) {
+            ctx.built = null; // objet périmé… : ce clip sera repris seul
+          }
+        }
+      }, label));
+      if (!t1) return;
+      for (const ctx of grouped) if (ctx.built && ctx.built.program.length > 0) t2Batch.push(ctx);
+      if (t2Batch.length === 0) return;
+      try {
+        t2 = accepted(project.executeTransaction((compoundAction) => {
+          for (const ctx of t2Batch) {
+            for (const action of buildClipInterpolations(ctx.built.program, ctx.chain, interpFid)) compoundAction.addAction(action);
+          }
+        }, label));
+      } catch (err) { t2 = false; t2Message = err.message; }
+    });
+  } catch (err) {
+    /* T1 ou le verrou a levé avant d'aboutir : t1 reste false → repli */
+  }
+
+  if (t1) {
+    fidelity.transactions += 1;
+    for (const ctx of grouped) {
+      if (!ctx.built) { retry.push(ctx); continue; }
+      mergeFidelity(fidelity, ctx.built.fid);
+      fidelity.paramsSet += ctx.built.count;
+    }
+    if (t2 === true) {
+      fidelity.transactions += 1;
+      mergeFidelity(fidelity, interpFid);
+    } else if (t2 === false) {
+      let lost = 0;
+      for (const ctx of t2Batch) lost += interpolationCount(ctx.built.program);
+      fidelity.interpSkipped = (fidelity.interpSkipped || 0) + lost;
+      fidelity.detail.push({ reason: "INTERP_REJECTED", interpolations: lost,
+        message: t2Message || "transaction d'interpolation refusée" });
+    }
+  } else {
+    for (const ctx of grouped) { ctx.built = null; retry.push(ctx); }
+  }
+
+  // d. Repli clip par clip.
+  for (const ctx of retry) {
+    report.perClip = true;
+    await applyParamsAlone(project, ctx, fidelity, label, timebase, markParamsFailed);
+  }
+  return report;
 }
 
 /* mode "insert" (défaut) : pose en HAUT de la pile utilisateur, comme le natif.
@@ -659,6 +977,106 @@ function runTransaction(project, label, stepGroups, mode) {
     }, label);
   });
   return success;
+}
+
+/* Insertion des effets du plan sur tous les clips préparés, puis vérification
+ * clip par clip. Rend { applied, failed, perClip }. */
+async function insertEffects(project, clips, operations, addable, label, fidelity) {
+  const N = operations.length;
+  const applied = [];
+  const failed = [];
+  let perClip = false;
+
+  // 1) Transaction d'insertion groupée : un ⌘Z retire les effets de TOUS les
+  // clips (les réglages ont leur propre transaction groupée, voir applyParams).
+  try {
+    if (accepted(runTransaction(project, label, clips.map((c) => c.steps), "insert"))) fidelity.transactions += 1;
+  } catch (err) { /* vérification ci-dessous, pas de confiance au booléen */ }
+
+  // 2) VÉRIFICATION par clip : la transaction groupée peut renvoyer « succès »
+  // alors que certains clips (graphiques, sous-titres…) n'ont rien reçu. On
+  // relit chaque chaîne et on réapplique individuellement les manquants.
+  //
+  // 2026-10-09 (audit P-07) : la vérification ne compte plus seulement les
+  // composants. CAUSE : « reçu » = nombre ≥ avant + N, toute exception = « pas
+  // reçu », puis on réinsérait les N effets. Une insertion PARTIELLE (2 des 3
+  // effets sur un clip : composant périmé, AGENTS §3.1 item 3) ou une relecture
+  // qui levait une fois donnaient des effets EN DOUBLE, les rescapés aux
+  // valeurs par défaut, et une réponse « succès ». CORRECTION : on relit les
+  // matchNames ; delta = nombre − avant :
+  //   - delta ≥ N et la suite du plan retrouvée (locateInserted) → reçu ;
+  //   - delta = 0 et relecture réussie → rien reçu : réinsertion (insert puis
+  //     append, comme avant) ;
+  //   - 0 < delta < N (ou suite introuvable) → PARTIAL_INSERT ; relecture
+  //     impossible (après un 2ᵉ essai) → READBACK_FAILED : on ne réinsère RIEN,
+  //     le clip est annoncé en échec. Mieux vaut un clip signalé qu'un doublon.
+  for (const clip of clips) {
+    let state = await inspectInsertion(clip, operations);
+    if (state.status === "none") {
+      // Réapplication ciblée avec des composants neufs : d'abord en insertion
+      // (haut de pile), puis en append si le clip refuse l'insertion indexée —
+      // mieux vaut un effet au mauvais rang que pas d'effet du tout.
+      perClip = true;
+      for (const mode of ["insert", "append"]) {
+        try {
+          const fresh = await prepareClip(clip.item, operations, addable);
+          if (fresh) {
+            if (accepted(runTransaction(project, label, [fresh.steps], mode))) fidelity.transactions += 1;
+            clip.insertIndex = mode === "append" ? null : fresh.insertIndex;
+          }
+        } catch (e) { /* vérifié juste après */ }
+        state = await inspectInsertion(clip, operations);
+        if (state.status === "none") continue;
+        if (state.status === "received" && mode === "append") {
+          fidelity.detail.push({ clip: clip.name, reason: "INSERT_FELL_BACK_TO_APPEND" });
+        }
+        break;
+      }
+    }
+    if (state.status === "received") {
+      // Noms et position du bloc gardés pour la pose des réglages (pas de
+      // 2ᵉ relecture de la chaîne).
+      clip.names = state.names;
+      clip.base = state.base;
+      applied.push(clip);
+      continue;
+    }
+    // Diagnostic : type de média relevé pour ce clip (un échec sur un item
+    // classé « video » est un vrai problème d'insertion, pas de l'audio).
+    const reason = state.status === "partial" ? "PARTIAL_INSERT"
+      : state.status === "unreadable" ? "READBACK_FAILED" : "EFFECT_NOT_RECEIVED";
+    const entry = { clip: clip.name, reason,
+      kind: clip.cls && clip.cls.kind, via: clip.cls && clip.cls.via, mediaType: clip.cls && clip.cls.raw };
+    if (state.status === "partial") { entry.added = state.delta; entry.expected = N; }
+    if (state.message) entry.message = state.message;
+    fidelity.detail.push(entry);
+    clip.failReason = reason;
+    failed.push(clip);
+  }
+  return { applied, failed, perClip };
+}
+
+/* État de l'insertion sur un clip, relu par matchNames (audit P-07) :
+ * { status: "received" | "none" | "partial" | "unreadable", names, base, delta }. */
+async function inspectInsertion(clip, operations) {
+  const N = operations.length;
+  let names = null;
+  let lastError = null;
+  // Une relecture qui lève UNE fois ne doit pas conclure à « rien reçu » (ce
+  // qui déclenchait la réinsertion) : 2ᵉ essai avant de déclarer l'échec.
+  for (let attempt = 0; attempt < 2 && names == null; attempt++) {
+    try { names = await readChainNames(clip.item); } catch (err) { lastError = err; }
+  }
+  if (names == null) {
+    return { status: "unreadable", message: lastError ? lastError.message : "relecture impossible" };
+  }
+  const delta = names.length - clip.baseline;
+  if (delta === 0) return { status: "none", delta, names };
+  if (delta >= N) {
+    const base = locateInserted(names, operations, clip.insertIndex);
+    if (base >= 0) return { status: "received", delta, names, base };
+  }
+  return { status: "partial", delta, names };
 }
 
 async function apply(plan, options) {
@@ -699,10 +1117,13 @@ async function apply(plan, options) {
 
   // Préparation par clip (hors transaction) + relevé du nombre de composants
   // AVANT (baseline) pour vérifier ensuite que l'effet a réellement été posé.
-  const fidelity = { paramsSet: 0, paramsSkipped: 0, detail: missing };
+  // paramsFailedClips / transactions : contrat §4.1 (audit P-06 / P-02).
+  const fidelity = { paramsSet: 0, paramsSkipped: 0, detail: missing, paramsFailedClips: [], transactions: 0 };
   const clips = []; // { item, name, steps, baseline }
+  const prepareFailed = []; // clips vidéo (ou indécis) impossibles à préparer
   let skippedNonVideo = 0;
-  for (const item of items) {
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
     let name = "(sans nom)";
     try { name = await item.getName(); } catch (e) { /* non bloquant */ }
     // Piste AUDIO liée (même nom que la vidéo) : hors périmètre → écartée AVANT
@@ -712,91 +1133,70 @@ async function apply(plan, options) {
     if (cls.kind === "unknown") {
       fidelity.detail.push({ clip: name, reason: "MEDIA_TYPE_UNKNOWN", mediaType: cls.raw, via: cls.via });
     }
-    let baseline = -1;
+    // 2026-10-09 (audit P-11, A1#11) : préparation protégée CLIP PAR CLIP.
+    // CAUSE : un clip vidéo dont la chaîne était illisible ou dont
+    // createComponent rendait null était compté avec les pistes audio
+    // (NON_VIDEO, que l'app tait) : ignoré sans un mot ; une exception de
+    // createComponent faisait échouer TOUTE l'application (INTERNAL) ; et si
+    // tous échouaient, le monteur lisait « Sélectionne un clip vidéo » alors
+    // qu'il en avait sélectionné. CORRECTION : l'échec va dans failedClips
+    // (PREPARE_FAILED), les autres clips continuent ; NO_APPLICABLE_CLIP est
+    // réservé au cas « que de l'audio », sinon TRANSACTION_FAILED.
     try {
       const chain = await item.getComponentChain();
-      baseline = chain ? chain.getComponentCount() : -1;
-    } catch (e) { baseline = -1; }
-    if (baseline < 0) { skippedNonVideo += 1; continue; } // clip audio / non applicable
-    const prepared = await prepareClip(item, plan.operations, addable);
-    if (prepared) clips.push({ item, name, steps: prepared.steps, insertIndex: prepared.insertIndex, baseline, cls });
-    else skippedNonVideo += 1;
+      if (!chain) throw new Error("chaîne d'effets absente");
+      const baseline = chain.getComponentCount();
+      // 2026-10-09 (audit P-02, B3#10) : preset 100 % intrinsèque (rien à
+      // insérer) → ni préparation (deux lectures de chaîne par clip pour rien)
+      // ni transaction d'insertion VIDE (une entrée d'annulation qui ne fait rien).
+      if (N === 0) { clips.push({ item, name, index, steps: [], insertIndex: null, baseline, cls }); continue; }
+      const prepared = await prepareClip(item, plan.operations, addable);
+      if (!prepared) throw new Error("préparation impossible (chaîne illisible ou effet non créé)");
+      clips.push({ item, name, index, steps: prepared.steps, insertIndex: prepared.insertIndex, baseline, cls });
+    } catch (err) {
+      prepareFailed.push({ item, name, index, cls, failReason: "PREPARE_FAILED" });
+      fidelity.detail.push({ clip: name, reason: "PREPARE_FAILED", message: err.message,
+        kind: cls.kind, via: cls.via, mediaType: cls.raw });
+    }
   }
   if (clips.length === 0) {
+    if (prepareFailed.length > 0) {
+      throw new CmdError(CODES.TRANSACTION_FAILED,
+        `Aucun clip n'a pu être préparé (${prepareFailed.length}) : ${fidelity.detail.filter((d) => d.reason === "PREPARE_FAILED").map((d) => d.message)[0]}`);
+    }
     throw new CmdError(CODES.NO_APPLICABLE_CLIP, "Sélection sans clip vidéo applicable");
   }
 
   const label = plan.label || "Khanjar";
-
-  // 1) Transaction groupée (un seul Cmd+Z si tout passe).
+  let applied = clips;
+  let failed = [];
   let transaction = "single";
-  try {
-    runTransaction(project, label, clips.map((c) => c.steps), "insert");
-  } catch (err) { /* vérification ci-dessous, pas de confiance au booléen */ }
-
-  // 2) VÉRIFICATION par clip : le nombre de composants a-t-il augmenté de N ?
-  // C'est le cœur du correctif multi-clips : la transaction groupée peut
-  // renvoyer « succès » alors que certains clips (graphiques, sous-titres…)
-  // n'ont rien reçu. On relit et on réapplique individuellement les manquants.
-  async function receivedEffect(clip) {
-    try {
-      const chain = await clip.item.getComponentChain();
-      return chain && chain.getComponentCount() >= clip.baseline + N;
-    } catch (e) { return false; }
-  }
-
-  const applied = [];
-  const failed = [];
-  for (const clip of clips) {
-    if (await receivedEffect(clip)) { applied.push(clip); continue; }
-    // Réapplication ciblée avec des composants neufs : d'abord en insertion
-    // (haut de pile), puis en append si le clip refuse l'insertion indexée —
-    // mieux vaut un effet au mauvais rang que pas d'effet du tout.
-    transaction = "per-clip";
-    let received = false;
-    for (const mode of ["insert", "append"]) {
-      try {
-        const fresh = await prepareClip(clip.item, plan.operations, addable);
-        if (fresh) {
-          runTransaction(project, label, [fresh.steps], mode);
-          clip.insertIndex = mode === "append" ? null : fresh.insertIndex;
-        }
-      } catch (e) { /* vérifié juste après */ }
-      if (await receivedEffect(clip)) {
-        received = true;
-        if (mode === "append") fidelity.detail.push({ clip: clip.name, reason: "INSERT_FELL_BACK_TO_APPEND" });
-        break;
-      }
-    }
-    if (!received) {
-      // Diagnostic : type de média relevé pour ce clip (un échec sur un item
-      // classé « video » est un vrai problème d'insertion, pas de l'audio).
-      fidelity.detail.push({ clip: clip.name, reason: "EFFECT_NOT_RECEIVED",
-        kind: clip.cls && clip.cls.kind, via: clip.cls && clip.cls.via, mediaType: clip.cls && clip.cls.raw });
-    }
-    (received ? applied : failed).push(clip);
+  if (N > 0) {
+    const insertion = await insertEffects(project, clips, plan.operations, addable, label, fidelity);
+    applied = insertion.applied;
+    failed = insertion.failed;
+    if (insertion.perClip) transaction = "per-clip";
   }
 
   if (applied.length === 0) {
     throw new CmdError(CODES.TRANSACTION_FAILED, "Aucun clip n'a pu recevoir l'effet");
   }
 
-  // M4 : pose des paramètres sur les composants insérés (2e transaction)
-  if (plan.operations.length > 0) {
-    await applyParamsPostInsert(project, applied, plan.operations, fidelity, label, timebase);
-  }
+  // Réglages des effets insérés ET des intrinsèques (Opacity/Motion) : une
+  // transaction groupée pour tous les clips (+ une d'interpolation si besoin).
+  const params = await applyParams(project, applied, plan.operations, existingOps, fidelity, label, timebase, relative);
+  if (params.perClip) transaction = "per-clip";
 
-  // Effets intrinsèques (Opacity/Motion) : params sur les composants EXISTANTS.
-  if (existingOps.length > 0) {
-    await applyExistingOps(project, applied, existingOps, fidelity, label, timebase, relative);
-  }
-
+  // Clips en échec (préparation puis insertion), dans l'ordre de la sélection ;
+  // `reason` = celle du premier (PREPARE_FAILED, PARTIAL_INSERT,
+  // READBACK_FAILED ou EFFECT_NOT_RECEIVED), le détail porte les autres.
+  const allFailed = prepareFailed.concat(failed).sort((a, b) => a.index - b.index);
   return {
     applied: { clips: applied.length, clipNames: applied.map((c) => c.name) },
     skipped: {
-      items: skippedNonVideo + failed.length,
-      reason: failed.length ? "EFFECT_NOT_RECEIVED" : (skippedNonVideo ? "NON_VIDEO" : undefined),
-      failedClips: failed.map((c) => c.name),
+      items: skippedNonVideo + allFailed.length,
+      reason: allFailed.length ? (allFailed[0].failReason || "EFFECT_NOT_RECEIVED") : (skippedNonVideo ? "NON_VIDEO" : undefined),
+      failedClips: allFailed.map((c) => c.name),
     },
     fidelity,
     transaction,

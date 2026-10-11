@@ -4,6 +4,11 @@
 *Version 1.0 — 2026-07-06 — Phase 3*
 *Nom de code : « Dagger » (modifiable sans impact technique)*
 
+> Document de conception de juillet, devenu Khanjar le 2026-10-06. Les passages contredits par le code
+> ont été corrigés le 2026-10-09 (audit du 2026-10-08) ; le reste (arborescence, distribution en DMG,
+> schémas partagés…) décrit le plan d'origine. Ce qui fait foi : `docs/PROTOCOL.md` pour le pont,
+> `AGENTS.md` pour le comportement et les pièges.
+
 ---
 
 ## 0. Fondations : ce document ne repose que sur des faits validés
@@ -73,9 +78,10 @@ pénible à mettre à jour (remove+install).
 
 ## 2. Processus 1 — Dagger Helper (Swift, AppKit)
 
-App de barre de menus (`LSUIElement`), sans Dock. Cible : macOS 12+, arm64 +
-x86_64 (universal). Zéro dépendance externe (Network.framework, Carbon,
-AppKit, SwiftUI pour les vues internes).
+App de barre de menus (`LSUIElement`), sans Dock. Cible : macOS 13+ (décision
+du 2026-10-08), arm64 seulement (le build universel exige Xcode complet, cf.
+`scripts/build-app.sh`). Une seule dépendance externe, Sparkle (mises à jour,
+depuis l'app 0.8.0) ; le reste : Network.framework, Carbon, AppKit, SwiftUI.
 
 ### 2.1 Modules et responsabilités
 
@@ -88,7 +94,7 @@ AppKit, SwiftUI pour les vues internes).
 | `IndexStore` | Source de vérité en mémoire des `SearchItem` ; fusion des sources (effets, presets user, presets Adobe) ; snapshot JSON sur disque pour démarrage instantané ; invalidation ciblée | Parser |
 | `PresetIndexer` | Parser `.prfpset` (XML `PremiereData`) → presets nommés + `ApplyPlan` ; surveiller le fichier profil (DispatchSource/FSEvents, debounce 2 s) ; presets Adobe du bundle (locale UI de Premiere, repli en_US) | Décider quand chercher |
 | `BridgeServer` | Serveur WebSocket loopback (NWListener, port 48123 configurable) ; sessions, handshake `hello`, heartbeats, corrélation requête/réponse, timeouts | Interpréter les commandes |
-| `PluginLifecycleService` | Détecter Premiere (NSWorkspace notifications) ; vérifier installation/version du plugin ; installer/mettre à jour via UPIA (remove+install, validé) ; diagnostics | UI |
+| `PluginLifecycleService` | Détecter Premiere (NSWorkspace notifications) ; vérifier installation/version du plugin ; installer via UPIA, mettre à jour (remove+install) **Premiere fermé** depuis l'app 0.8.4 (M1, AGENTS.md §6) ; diagnostics | UI |
 | `UsageStore` | Compteurs d'usage par item (fréquence + dernière utilisation), persistés | Scoring |
 | `SettingsStore` | Raccourci (keyCode+modifiers), nombre de résultats, thème, port ; JSON dans `~/Library/Application Support/Dagger/` | — |
 | `HUDController` | Retour discret post-action (toast 1,5 s : « Gaussian Blur → 3 clips », « Aucun clip sélectionné », erreurs) | Bloquer |
@@ -100,8 +106,8 @@ AppKit, SwiftUI pour les vues internes).
 Idle (Premiere absent : hotkey désenregistré, bridge en écoute)
   └─ Premiere lancé ──► WaitingPlugin (hotkey actif ; ⌘J → HUD "connexion…")
         └─ hello reçu ──► Ready (flux nominal)
-        └─ timeout 20 s ──► Degraded (⌘J → HUD diagnostic :
-              plugin installé ? → proposer installation UPIA en 1 clic)
+        └─ 20 s sans hello ──► installation automatique du plugin par UPIA
+              (pas de bouton ; reprise automatique : AGENTS.md §6 et §6bis)
   Premiere quitté ──► Idle (socket fermée proprement, index conservé)
 ```
 
@@ -117,7 +123,9 @@ reconnexion automatique du plugin, validée à 2 s).
    premier résultat pré-sélectionné.
 3. Enter → fermeture **immédiate** du panel (optimiste), puis envoi
    `apply` au plugin ; réponse (mesurée à 12 ms) → HUD de confirmation ;
-   échec/timeout (800 ms) → HUD d'erreur explicite. `UsageStore` incrémenté.
+   échec → HUD d'erreur explicite ; délai : 4 s + 1 s par tranche de 200
+   keyframes du plan, plafond 30 s (délai doux puis dur à partir de l'app 0.8.4,
+   cf. PROTOCOL.md). `UsageStore` incrémenté.
 4. Esc → fermeture, aucun effet de bord.
 
 ---
@@ -125,21 +133,21 @@ reconnexion automatique du plugin, validée à 2 s).
 ## 3. Processus 2 — Dagger Executor (plugin UXP headless)
 
 Manifest v5, `main: index.js`, **aucun panneau**, `hostUIContext.hideFromMenu:
-true` (racine — syntaxe validée), permissions : `network.domains: all` (le
-manifest UXP ne permet pas de restreindre à localhost ; le serveur n'écoute que
-loopback), `ipc.enablePluginCommunication` (réservé évolutions). Host
-`premierepro minVersion 25.6`. JavaScript pur, bundlé en un fichier par esbuild
+true` (racine — syntaxe validée), permissions : `network.domains:
+["ws://localhost/"]` seulement (WebSockets locaux ; ni IP ni port, mesuré le
+2026-10-06, AGENTS.md §3.1 item 16 ; avant : `all`), `ipc.enablePluginCommunication`
+(réservé évolutions). Host `premierepro minVersion 25.6`. JavaScript pur, bundlé en un fichier par esbuild
 (pas de framework — le plugin n'a pas d'UI).
 
 ### 3.1 Modules
 
 | Module | Responsabilité |
 |---|---|
-| `bridge/WsClient` | Connexion sortante `ws://127.0.0.1:<port>`, reconnexion 2 s, heartbeat 5 s, sérialisation |
+| `bridge/WsClient` | Connexion sortante `ws://localhost:48123`, reconnexion 2 s, battement 5 s (information seulement), sérialisation |
 | `bridge/CommandRouter` | Dispatch des requêtes par `cmd`, corrélation `id`, capture d'erreurs → réponses typées (jamais d'exception non catchée) |
 | `premiere/EffectEnumerator` | `listEffects` : matchNames + displayNames vidéo (et audio, marqués `capability`) |
 | `premiere/SelectionInspector` | Sélection courante : nombre d'items, types (vidéo/audio), noms |
-| `premiere/EffectApplier` | Exécuter un `ApplyPlan` : préparer les composants (async) PUIS une seule `lockedAccess`+`executeTransaction` nommée (undo unique) ; par clip vidéo de la sélection ; rapporter par-clip |
+| `premiere/EffectApplier` | Exécuter un `ApplyPlan` : préparer les composants (async) PUIS une `lockedAccess`+`executeTransaction` nommée qui insère les effets sur tous les clips vidéo de la sélection ; les réglages suivent dans une 2ᵉ transaction (l'API n'expose un réglage qu'une fois l'effet posé) ; rapporter par clip |
 | `premiere/ParamWriter` | Poser les valeurs/keyframes de paramètres (`ComponentParam.createSetValueAction` etc.) ; typé par famille de paramètres ; **rapporte la fidélité** (params appliqués / ignorés) |
 | `env/Probe` | `hello` enrichi : version plugin, version Premiere, locale UI, capacités (audio ok ?, param types supportés) |
 | `log/DiskLog` | Journal dans le dossier de données du plugin (pattern validé), niveau debug pilotable par le Helper |
@@ -151,9 +159,13 @@ loopback), `ipc.enablePluginCommunication` (réservé évolutions). Host
 - **Contrat d'erreur exhaustif** : toute commande répond `ok:false` +
   `code` machine + `message` humain (taxonomie §4.4). Le Helper ne parse
   jamais de texte libre.
-- **Une transaction par action utilisateur** (multi-clips inclus → un seul
-  Cmd+Z). Point à re-vérifier en M1 : une transaction couvrant plusieurs
-  clips ; repli documenté : une transaction par clip, nommées identiquement.
+- **Annulation : un ⌘Z pour un effet ; deux pour un preset avec réglages**
+  (insertion, puis réglages : l'API n'expose les réglages d'un effet qu'une
+  fois posé). L'insertion couvre tous les clips en une transaction ; les
+  réglages étaient posés clip par clip jusqu'à l'app 0.8.3 (1 + N annulations)
+  et sont regroupés par le correctif P-02 de l'audit du 2026-10-08 (à vérifier
+  dans Premiere, test T-01). Repli : une transaction par clip, nommées
+  identiquement.
 - Le plugin **ne lit pas** les `.prfpset` (le Helper le fait : plus rapide,
   pas de permission fs UXP, parsing testable hors Premiere).
 
@@ -177,12 +189,13 @@ mise à jour du plugin (UPIA) ; le plugin reste passif.
 ```json
 // plugin → helper, à la connexion
 { "v":1, "kind":"event", "type":"hello",
-  "plugin": {"id":"com.dagger.executor","version":"1.2.0"},
-  "host": {"app":"premierepro","version":"26.3.0","uiLocale":"fr_FR"},
+  "plugin": {"id":"io.khanjar.executor","version":"0.7.2"},
+  "host": {"app":"premierepro","version":"26.5.2","uiLocale":"fr_FR"},
   "capabilities": {"audioEffects":false,"keyframes":true} }
 
-// heartbeat plugin → helper toutes les 5 s ; le Helper marque la session
-// morte après 3 manqués et attend la reconnexion
+// battement plugin → helper toutes les 5 s, pour INFORMATION : le Helper ne
+// déclare jamais une session morte faute de battements (une longue transaction
+// bloque les minuteries du plugin) ; c'est la fermeture de la socket qui la termine
 { "v":1, "kind":"event", "type":"hb", "n":42 }
 ```
 
@@ -197,20 +210,16 @@ mise à jour du plugin (UPIA) ; le plugin reste passif.
 // → res : { "items":[{"name":"plan_04.mov","kind":"video"}], "videoCount":2, "audioCount":1 }
 
 { "v":1, "kind":"req", "id":"…", "cmd":"apply",
-  "plan": {
-    "label": "True Drop Shadow",            // nom de la transaction (undo)
-    "target": "selection",
-    "operations": [
-      { "effect": {"matchName":"AE.ADBE Drop Shadow"},
-        "params": [
-          {"paramKey":"Opacity", "value":0.75},
-          {"paramKey":"Distance","keyframes":[{"t":0,"v":5},{"t":1.0,"v":30,"interp":"bezier"}]}
-        ] } ] } }
-// → res : { "ok":true, "applied":{"clips":3,"clipNames":[…]},
-//           "fidelity":{"paramsSet":11,"paramsSkipped":2,
-//                        "skipped":[{"paramKey":"…","reason":"ARB_PARAM_UNSUPPORTED"}]},
-//           "latencyMs":14 }
+  "plan": { "label": "True Drop Shadow",    // nom de la transaction (annulation)
+            "target": "selection",
+            "operations": [ … ], "existingOperations": [ … ] },
+  "options": { "relativeToClip": true } }
+// → res : { "applied":{"clips":3,"clipNames":[…]}, "skipped":{…},
+//           "fidelity":{"paramsSet":11,"paramsSkipped":2,"detail":[…]},
+//           "transaction":"single", "latencyMs":14 }
 ```
+Format exact (réglages par index et nom, ancrage, `paramCount`, keyframes et ease, raisons de fidélité,
+champs `expiresAt`, `paramsFailedClips`, `transactions` du plugin 0.7.3) : **`docs/PROTOCOL.md`**.
 
 L'**`ApplyPlan`** est le pivot : produit par le Helper (depuis un effet nu ou
 un preset parsé), consommé par le plugin. Un preset multi-effets = plusieurs
@@ -222,18 +231,24 @@ le détail va au journal.
 
 `NO_PROJECT` · `NO_SEQUENCE` · `NO_SELECTION` · `NO_APPLICABLE_CLIP` (sélection
 100 % audio en v1) · `EFFECT_NOT_FOUND` (matchName absent de cette install) ·
-`TRANSACTION_FAILED` · `PARAM_WRITE_FAILED` · `UNSUPPORTED_CMD` ·
-`PROTOCOL_MISMATCH` · `INTERNAL`. Côté Helper : `PLUGIN_DISCONNECTED`,
-`TIMEOUT`. Chaque code a un message HUD français dédié et une entrée de journal.
+`TRANSACTION_FAILED` · `ADJUSTMENT_NOT_FOUND` · `PARAM_WRITE_FAILED` (défini,
+jamais émis) · `UNSUPPORTED_CMD` · `PROTOCOL_MISMATCH` · `INTERNAL` ; plugin 0.7.3 :
+`BUSY`, `EXPIRED`. Côté Helper : `PLUGIN_DISCONNECTED`, `TIMEOUT`. Chaque code
+a un message HUD traduit et une entrée de journal.
 
 ### 4.5 Sécurité
 
-Loopback uniquement (`requiredLocalEndpoint 127.0.0.1`, validé). Le `hello`
-doit porter l'id de plugin attendu ; une seule session active (nouvelle
-connexion valide → remplace l'ancienne). Durcissement prévu (v1.1) : jeton
-aléatoire écrit par le Helper dans le dossier de données du plugin à
-l'installation, renvoyé dans `hello` — documenté dans PROTOCOL.md, non bloquant
-pour v1 (surface : processus locaux du même utilisateur).
+Boucle locale uniquement : `127.0.0.1` et `[::1]` (app 0.8.4, C-18), port 48123.
+Filtre d'origine à la poignée de main (app 0.8.4, C-07, décision Q9) : refus de ce
+qu'un NAVIGATEUR peut émettre — `http`, `https`, `data`, `blob`, tout schéma en
+`-extension`, la valeur `null` ; acceptés : pas d'en-tête, `file://` (le plugin UXP)
+et tout autre schéma non web (détail : PROTOCOL.md, AGENTS.md §12). Le `hello` doit
+porter l'id de plugin attendu ; une seule session active, et un `hello` ne remplace
+plus une session qui a donné signe de vie depuis moins de 10 s (C-19) ; une
+connexion sans `hello` est fermée au bout de 10 s (C-06). Pas de jeton partagé : l'idée de juillet
+(jeton dans le dossier de données du plugin) est abandonnée, ce dossier
+disparaît quand Adobe désinscrit le plugin (AGENTS.md §12). Surface restante :
+les programmes du Mac, y compris sous un autre compte macOS (audit sécurité A6).
 
 ---
 
@@ -301,12 +316,15 @@ recherche, pas de GC : Swift/ARC.
 | Composant | Min | Vérifié par |
 |---|---|---|
 | Premiere Pro | 25.6 (UXP GA) ; cible 26.x | `hello.host.version` ; refus poli en deçà |
-| macOS | 12.0 | build |
+| macOS | 13.0 (décision du 2026-10-08) | `LSMinimumSystemVersion` (build-app.sh), repris par l'appcast |
 | Protocole | négocié via `v` | handshake |
 
 ### 6.3 Télémétrie : aucune
 
-Pas de réseau sortant hors loopback. Les journaux restent locaux.
+Pas de télémétrie ; les journaux restent locaux. Seul réseau sortant : la
+vérification des mises à jour (Sparkle, avec l'accord de l'utilisateur). Les
+rapports de plantage n'existent que dans un build qui porte une adresse d'envoi
+(aucune version publiée n'en a).
 
 ---
 
@@ -315,12 +333,12 @@ Pas de réseau sortant hors loopback. Les journaux restent locaux.
 | Situation | Comportement |
 |---|---|
 | ⌘J sans Premiere au premier plan | Ignoré silencieusement (validé) |
-| ⌘J, plugin pas connecté | HUD « Connexion à Premiere… » puis diagnostic + bouton « Réparer » (réinstallation UPIA) |
+| ⌘J, plugin pas connecté | HUD selon l'état (`PluginStatus`, C-05) : « Ouvre Premiere Pro pour utiliser Khanjar » (fermé), « Connexion à Premiere… » (jamais connecté), « Khanjar se reconnecte à Premiere… » (après une vraie déconnexion), installation en cours / échouée / Premiere à relancer ; plugin muet depuis plus de 45 s → réinstallation automatique par UPIA, jamais dans la minute qui suit le lancement de Premiere (AGENTS.md §6, §6bis). Entrée de menu « Réinstaller le plugin dans Premiere » (C-05) |
 | Aucun clip sélectionné | HUD discret « Aucun clip sélectionné » (exigence produit) — v1 n'applique jamais en repli |
 | Sélection sans clip vidéo applicable | HUD « Sélection audio uniquement » |
 | Recherche sans résultat | « Aucun résultat » dans la liste (exigence produit) |
 | Preset partiellement fidèle | Appliqué + HUD « n paramètres non transférables » + détail au journal ; badge dans la liste |
-| Timeout apply (800 ms) | HUD erreur + journal ; l'état Premiere reste cohérent (transaction atomique côté hôte) |
+| Délai d'apply dépassé (4 s + 1 s / 200 keyframes, plafond 30 s) | App 0.8.4 (C-02, P-08) : le délai doux ne déclenche qu'un message d'attente, le verrou est GARDÉ jusqu'au délai dur (120 s) et la réponse tardive est livrée ; pendant ce temps une nouvelle validation reçoit « Premiere applique encore le précédent » (rien n'est envoyé), et le plugin répond `BUSY`/`EXPIRED` sans rien faire. Au délai dur : « Premiere ne répond toujours pas — vérifie la timeline avant de réessayer » (PROTOCOL.md « Délais ») |
 | Fichier prfpset corrompu/illisible | Source ignorée, reste de l'index intact, erreur journalisée, badge dans Réglages |
 | Raccourci déjà pris (RegisterEventHotKey ≠ noErr) | Réglages ouverts avec message, saisie d'un autre raccourci |
 

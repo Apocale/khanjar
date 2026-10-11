@@ -18,6 +18,12 @@ const CODES = {
   ADJUSTMENT_NOT_FOUND: "ADJUSTMENT_NOT_FOUND",
   UNSUPPORTED_CMD: "UNSUPPORTED_CMD",
   PROTOCOL_MISMATCH: "PROTOCOL_MISMATCH",
+  // 2026-10-09 (audit P-08, contrat §4.1) : refus AVANT toute action sur le
+  // projet. BUSY = une commande qui modifie le projet tourne déjà ; EXPIRED =
+  // échéance `expiresAt` de la requête dépassée avant de commencer. Dans les
+  // deux cas rien n'a été fait : l'app peut le dire sans risque de doublon.
+  BUSY: "BUSY",
+  EXPIRED: "EXPIRED",
   INTERNAL: "INTERNAL",
 };
 

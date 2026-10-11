@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Parser des fichiers `.prfpset` (XML `PremiereData`, schéma relevé sur
@@ -62,6 +63,10 @@ struct PresetParam {
     /// Pour un Arb de Lumetri : true = à son état neutre (le preset ne s'en sert pas),
     /// false = utilisé (courbe, roue, LUT…), nil = inconnu ou sans objet.
     var arbNeutral: Bool? = nil
+    /// Nombre d'entrées (non vides) de <Keyframes> dans le fichier, lisibles ou non
+    /// (2026-10-09) : 0 avec le chrono activé = aucune image-clé, la valeur fixe compte (I-05) ;
+    /// plus que `keyframes.count` = une image-clé illisible (I-09).
+    var rawKeyframeCount: Int = 0
 }
 
 struct PresetEffect {
@@ -100,12 +105,22 @@ extension PresetEffect {
 }
 
 struct ParsedPreset {
-    /// GUID stable (MZ.EffectPresets.PresetUID), sinon "obj:<ObjectID>"
+    /// GUID stable (MZ.EffectPresets.PresetUID), sinon "h:<16 hex>" : empreinte
+    /// du contenu (voir `PrfpsetParser.contentId`). Avant le 2026-10-09 : "obj:<ObjectID>",
+    /// numéro que Premiere renumérote à chaque réécriture du fichier.
     let uid: String
     let name: String
     /// Chemin de dossiers dans le panneau Effets (racine "Root" exclue)
     let binPath: [String]
     let effects: [PresetEffect]
+    /// Favori Premiere (« raccourci », `EffectIsShorcut` = true) : pointe sur les
+    /// MÊMES FilterPreset qu'un preset rangé ailleurs (dossier « Fav »…).
+    var isShortcut: Bool = false
+    /// Références FilterPreset du preset, dans l'ordre (identité d'un favori).
+    var filterPresetRefs: [String] = []
+    /// Dossiers (et nom s'il diffère) des favoris fusionnés dans ce preset :
+    /// restent cherchables (mots-clés), sans ligne en double dans la palette.
+    var extraKeywords: [String] = []
 
     var isVideoOnly: Bool { effects.allSatisfy { $0.kind == "video" } }
     var arbParamCount: Int { effects.reduce(0) { $0 + $1.arbParamCount } }
@@ -120,9 +135,15 @@ enum PrfpsetParser {
     static func parse(fileURL: URL) throws -> [ParsedPreset] {
         let doc: XMLDocument
         do {
+            let data = try Data(contentsOf: fileURL)
+            if let refusal = refusalReason(data) {
+                throw PrfpsetParseError.unreadable("\(fileURL.lastPathComponent): \(refusal)")
+            }
             // Ne JAMAIS charger d'entités externes (défense XXE : un .prfpset est
             // du contenu potentiellement non fiable partagé entre utilisateurs).
-            doc = try XMLDocument(contentsOf: fileURL, options: [.nodeLoadExternalEntitiesNever])
+            doc = try XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever])
+        } catch let error as PrfpsetParseError {
+            throw error
         } catch {
             throw PrfpsetParseError.unreadable("\(fileURL.lastPathComponent): \(error.localizedDescription)")
         }
@@ -144,7 +165,80 @@ enum PrfpsetParser {
         for rootBin in roots {
             walkBin(rootBin, path: [], byId: byId, visited: &visited, into: &presets)
         }
-        return presets
+        return mergingShortcuts(presets)
+    }
+
+    /// 2026-10-09 (audit A3#2, décision Q5 d'Isma : une seule ligne par preset) :
+    /// un favori Premiere (`EffectIsShorcut` = true, dossier « Fav »…) qui pointe
+    /// sur EXACTEMENT les mêmes FilterPreset qu'un preset du fichier n'est plus un
+    /// item à part — chez Isma, « 2 drop shadow preset » apparaissait 4 fois et son
+    /// historique s'éparpillait entre l'original (149 applications) et ses favoris.
+    /// Le dossier du favori (et son nom s'il diffère) rejoint les mots-clés de
+    /// l'original, pour rester cherchable. Un favori sans original est gardé tel quel.
+    static func mergingShortcuts(_ presets: [ParsedPreset]) -> [ParsedPreset] {
+        var originals: [[String]: Int] = [:]
+        for (i, preset) in presets.enumerated() where !preset.isShortcut && !preset.filterPresetRefs.isEmpty {
+            if originals[preset.filterPresetRefs] == nil { originals[preset.filterPresetRefs] = i }
+        }
+        var merged = presets
+        var dropped = Set<Int>()
+        for (i, shortcut) in presets.enumerated() where shortcut.isShortcut {
+            guard let o = originals[shortcut.filterPresetRefs] else { continue }
+            dropped.insert(i)
+            var words = shortcut.binPath
+            if SearchItem.normalizedTitle(shortcut.name) != SearchItem.normalizedTitle(merged[o].name) {
+                words.append(shortcut.name)
+            }
+            for word in words where !merged[o].binPath.contains(word) && !merged[o].extraKeywords.contains(word) {
+                merged[o].extraKeywords.append(word)
+            }
+        }
+        return merged.enumerated().filter { !dropped.contains($0.offset) }.map(\.element)
+    }
+
+    /// 2026-10-09 (audit A3#2) : id d'un preset SANS PresetUID. Avant : « obj:<n° d'objet
+    /// XML> », que Premiere renumérote à chaque réécriture du fichier (98 presets sur 350
+    /// chez Isma, 20 sur 20 dans « 10 Smooth Zoom », 8 sur 8 chez Tech Wampus) : un
+    /// raccourci, un rang ⌘n ou un duo pouvait viser un AUTRE preset, sans alerte, et
+    /// un preset perso pouvait prendre le numéro d'un PiP Adobe. Désormais : « h: » +
+    /// 16 premiers caractères hexadécimaux du SHA-1 du chemin de dossiers, du nom, puis
+    /// pour chaque effet de son matchName et de ses paramètres (index, valeur authorée,
+    /// keyframes bruts), joints par U+0000. Même contenu = même id, quel que soit le
+    /// numéro ; un preset modifié change d'id (l'app le rattache alors par son titre).
+    static func contentId(_ parts: [String]) -> String {
+        let digest = Insecure.SHA1.hash(data: Data(parts.joined(separator: "\u{0}").utf8))
+        return "h:" + digest.map { String(format: "%02x", $0) }.joined().prefix(16)
+    }
+
+    /// 2026-10-09 (audit A3#10) : les entités INTERNES d'un fichier fabriqué étaient
+    /// développées par XMLDocument (entités imbriquées : 11 s, 7,9 Go de mémoire, un nom de
+    /// preset de 1,2 milliard de caractères) — `index-preview <pack téléchargé>` y était
+    /// exposé. Premiere n'écrit jamais de DTD : un fichier qui en déclare une est refusé
+    /// AVANT l'analyse XML. Pour que ce contrôle d'octets ne soit pas contournable par un
+    /// autre encodage (UTF-16, UTF-7, EBCDIC), seul l'UTF-8 est accepté — c'est ce que
+    /// Premiere écrit (profils et presets Adobe : « encoding="UTF-8" »).
+    static func refusalReason(_ data: Data) -> String? {
+        var start = data.startIndex
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) { start += 3 }                 // BOM UTF-8
+        while start < data.endIndex, [0x20, 0x09, 0x0A, 0x0D].contains(data[start]) { start += 1 }
+        guard start < data.endIndex else { return "fichier vide" }
+        let head = data[start..<min(data.endIndex, start + 512)]
+        guard data[start] == UInt8(ascii: "<"), !head.contains(0) else {
+            return "encodage non pris en charge (UTF-8 attendu)"
+        }
+        if head.starts(with: Array("<?xml".utf8)),
+           let end = head.range(of: Data("?>".utf8)),
+           let declaration = String(bytes: head[head.startIndex..<end.lowerBound], encoding: .utf8)?.lowercased(),
+           let encodingRange = declaration.range(of: "encoding") {
+            let value = declaration[encodingRange.upperBound...]
+                .drop { $0 == " " || $0 == "=" || $0 == "\"" || $0 == "'" }
+                .prefix { $0 != "\"" && $0 != "'" && $0 != " " }
+            guard value == "utf-8" || value == "utf8" else { return "encodage « \(value) » non pris en charge (UTF-8 attendu)" }
+        }
+        if data.range(of: Data("<!DOCTYPE".utf8)) != nil || data.range(of: Data("<!ENTITY".utf8)) != nil {
+            return "déclaration DTD ou ENTITY refusée (Premiere n'en écrit jamais)"
+        }
+        return nil
     }
 
     // MARK: - Parcours de l'arbre
@@ -166,6 +260,13 @@ enum PrfpsetParser {
             case "BinTreeItem":
                 walkBin(child, path: childPath, byId: byId, visited: &visited, into: &presets)
             case "TreeItem":
+                // 2026-10-09 (audit A3#10, cycle.prfpset) : un preset référencé deux
+                // fois apparaissait deux fois dans la palette. Une 2ᵉ référence au même
+                // TreeItem est ignorée (Premiere n'en écrit jamais : un favori est un
+                // TreeItem distinct, traité par mergingShortcuts).
+                if let oid = objectId(of: child) {
+                    guard visited.insert(oid).inserted else { continue }
+                }
                 if let preset = parseLeaf(child, path: childPath, byId: byId) {
                     presets.append(preset)
                 }
@@ -181,35 +282,46 @@ enum PrfpsetParser {
               let dataRef = firstDescendant(base, named: "Data")?.attribute(forName: "ObjectRef")?.stringValue,
               let presetItem = byId[dataRef], presetItem.name == "FilterPresetItem" else { return nil }
 
-        let uid = firstDescendant(leaf, named: "MZ.EffectPresets.PresetUID")?.stringValue
-            ?? "obj:\(objectId(of: presetItem) ?? "?")"
-
         // Deux schémas observés :
         //  - FilterPresetItem Version=2 (profil utilisateur) : conteneur
         //    <FilterPresets> avec refs ordonnées par Index (multi-effets) ;
         //  - FilterPresetItem Version=1 (presets Adobe du bundle) : une ref
         //    directe <FilterPreset ObjectRef="…"/> sans conteneur.
-        var effectDefs: [(index: Int, element: XMLElement)] = []
+        var effectDefs: [(index: Int, ref: String, element: XMLElement)] = []
         if let container = firstDescendant(presetItem, named: "FilterPresets") {
             for case let ref as XMLElement in container.children ?? [] where ref.name == "FilterPreset" {
                 guard let objectRef = ref.attribute(forName: "ObjectRef")?.stringValue,
                       let def = byId[objectRef] else { continue }
                 let index = Int(ref.attribute(forName: "Index")?.stringValue ?? "") ?? effectDefs.count
-                effectDefs.append((index, def))
+                effectDefs.append((index, objectRef, def))
             }
         } else {
             for case let ref as XMLElement in presetItem.children ?? [] where ref.name == "FilterPreset" {
                 guard let objectRef = ref.attribute(forName: "ObjectRef")?.stringValue,
                       let def = byId[objectRef] else { continue }
-                effectDefs.append((effectDefs.count, def))
+                effectDefs.append((effectDefs.count, objectRef, def))
             }
         }
         effectDefs.sort { $0.index < $1.index }
 
-        let effects = effectDefs.compactMap { parseEffectDef($0.element, byId: byId) }
+        var effects: [PresetEffect] = []
+        var fingerprint = path + [name]
+        for def in effectDefs {
+            guard let parsed = parseEffectDef(def.element, byId: byId) else { continue }
+            effects.append(parsed.effect)
+            fingerprint.append(contentsOf: parsed.fingerprint)
+        }
         guard !effects.isEmpty else { return nil }
 
-        return ParsedPreset(uid: uid, name: name, binPath: path, effects: effects)
+        // PresetUID quand Premiere en a écrit un (vide = absent) ; sinon empreinte du contenu.
+        let presetUID = firstDescendant(leaf, named: "MZ.EffectPresets.PresetUID")?.stringValue
+        let uid = (presetUID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? presetUID! : contentId(fingerprint)
+        let isShortcut = childText(presetItem, "EffectIsShorcut")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+
+        return ParsedPreset(uid: uid, name: name, binPath: path, effects: effects,
+                            isShortcut: isShortcut, filterPresetRefs: effectDefs.map(\.ref))
     }
 
     /// "t,v,mode,flags,inVel,inInf,outVel,outInf[,sMode,sFlags,inTanX,inTanY,outTanX,outTanY];…"
@@ -223,13 +335,22 @@ enum PrfpsetParser {
             // Offset SIGNÉ : un keyframe peut précéder l'ancre (il façonne la
             // rampe d'entrée) — le clamper à 0 écrasait plusieurs keyframes
             // sur le même tick (P4, revue 2026-07-20).
-            let offset = ticks - anchorTicks
+            // 2026-10-09 : soustraction sans débordement — des temps fabriqués (Int64.max
+            // moins une ancre très négative) faisaient planter l'app (SIGTRAP) à chaque
+            // reconstruction de l'index. Image-clé illisible → réglage non posé (I-09).
+            let (offset, overflow) = ticks.subtractingReportingOverflow(anchorTicks)
+            guard !overflow else { return nil }
             let mode = f.count >= 3 ? (Int(f[2]) ?? 0) : 0
             let num = { (i: Int) -> Double in i < f.count ? (Double(f[i]) ?? 0) : 0 }
             // Champs d'ease communs aux deux formats (4=inVel,5=inInf,6=outVel,7=outInf).
             let inVel = num(4), inInf = num(5), outVel = num(6), outInf = num(7)
+            // 2026-10-09 (audit A3#10) : « nan », « inf », « 1e400 » étaient acceptés —
+            // JSONEncoder refuse ensuite NaN : snapshot non écrit, application en échec.
+            // Une image-clé non finie est illisible (le réglage n'est pas posé, I-09).
+            guard [inVel, inInf, outVel, outInf].allSatisfy(\.isFinite) else { return nil }
             let rawVal = f[1]
             if let v = Double(rawVal) {
+                guard v.isFinite else { return nil }
                 return PresetKeyframe(offsetTicks: offset, value: v, pointX: nil, pointY: nil,
                                       interpolationMode: mode,
                                       inVelocity: inVel, inInfluence: inInf,
@@ -238,8 +359,10 @@ enum PrfpsetParser {
             }
             let parts = rawVal.split(separator: ":")
             if parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) {
+                guard x.isFinite, y.isFinite else { return nil }
                 // Format point : tangentes spatiales en champs 10–13.
                 let hasTan = f.count >= 14
+                guard !hasTan || (10...13).allSatisfy({ num($0).isFinite }) else { return nil }
                 return PresetKeyframe(offsetTicks: offset, value: nil, pointX: x, pointY: y,
                                       interpolationMode: mode,
                                       inVelocity: inVel, inInfluence: inInf,
@@ -251,12 +374,21 @@ enum PrfpsetParser {
         }
     }
 
-    private static func parseEffectDef(_ def: XMLElement, byId: [String: XMLElement]) -> PresetEffect? {
+    /// `fingerprint` : matchName puis, par paramètre, index, valeur authorée et keyframes
+    /// bruts — matière de l'id des presets sans PresetUID (`contentId`, 2026-10-09).
+    private static func parseEffectDef(_ def: XMLElement, byId: [String: XMLElement])
+        -> (effect: PresetEffect, fingerprint: [String])? {
         guard let matchName = childText(def, "FilterMatchName"), !matchName.isEmpty else { return nil }
+        var fingerprint = [matchName]
         let anchorTicks = Int64(childText(def, "AnchorInPoint") ?? "") ?? 0
         let anchorOutTicks = Int64(childText(def, "AnchorOutPoint") ?? "") ?? anchorTicks
-        let anchorType = Int(childText(def, "Type") ?? "") ?? 1
-        let srcDurationTicks = max(0, anchorOutTicks - anchorTicks)
+        // 2026-10-09 (audit A3#10) : `<Type>` absent valait 1 (« collé au début ») alors
+        // que le défaut Adobe documenté est 0 (Échelle). Les 8 623 FilterPreset du corpus
+        // ont tous un `<Type>` : seul un fichier abîmé ou fabriqué est concerné.
+        let anchorType = Int(childText(def, "Type") ?? "") ?? 0
+        // Sans débordement (temps fabriqués) : durée inconnue = 0.
+        let (span, spanOverflow) = anchorOutTicks.subtractingReportingOverflow(anchorTicks)
+        let srcDurationTicks = spanOverflow ? 0 : max(0, span)
 
         var displayName = matchName
         var kind = "unknown"
@@ -299,6 +431,7 @@ enum PrfpsetParser {
                     let startValue = startKf.split(separator: ",").dropFirst().first.map(String.init) ?? ""
                     let currentValue = firstDescendant(element, named: "CurrentValue")?.stringValue ?? ""
                     let authored = startValue.isEmpty ? currentValue : startValue
+                    fingerprint.append(contentsOf: [String(index), authored, keyframesRaw])
                     let isArb = element.name?.hasPrefix("Arb") == true
                     var arbNeutral: Bool? = nil
                     if isArb, matchName.contains("Lumetri"),
@@ -316,18 +449,22 @@ enum PrfpsetParser {
                         authoredValueRaw: authored,
                         isArb: isArb,
                         keyframes: isTimeVarying ? parseKeyframes(keyframesRaw, anchorTicks: anchorTicks) : [],
-                        arbNeutral: arbNeutral
+                        arbNeutral: arbNeutral,
+                        rawKeyframeCount: keyframesRaw.split(separator: ";").filter {
+                            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        }.count
                     )
                 }
             }
         }
-        return PresetEffect(matchName: matchName, displayName: displayName,
-                            kind: kind, paramCount: params.count,
-                            arbParamCount: params.filter(\.isArb).count,
-                            maskCount: maskCount,
-                            params: params,
-                            anchorType: anchorType,
-                            srcDurationTicks: srcDurationTicks)
+        let effect = PresetEffect(matchName: matchName, displayName: displayName,
+                                  kind: kind, paramCount: params.count,
+                                  arbParamCount: params.filter(\.isArb).count,
+                                  maskCount: maskCount,
+                                  params: params,
+                                  anchorType: anchorType,
+                                  srcDurationTicks: srcDurationTicks)
+        return (effect, fingerprint)
     }
 
     /// Masque sans forme : son tracé (Arb « 2cin » pour AE.ADBE AEMask, pid 7 pour
