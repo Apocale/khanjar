@@ -302,18 +302,20 @@
 
     // ---------- timeline drawing ----------
     function pps() { var l = lanes.V1; return (l ? l.clientWidth : 600) / VIEW; }
+    // a stereo clip's waveform as Premiere 2026 draws it: two channels, each rectified on its own baseline
     function wave(c, w) {
-      var n = Math.max(6, Math.round(w / 1.6)), seed = Math.round(c.s * 37) + c.n.length * 7, d = 'M0 50', e = '';
-      var amp = [];
-      for (var j = 0; j < n; j++) {
-        var r = rnd(seed + j), a;
-        if (c.w === 'music') a = 22 + 20 * Math.abs(Math.sin(j * .9 + seed)) * (.6 + .4 * r) + (j % 8 === 0 ? 10 : 0);
-        else { var env = Math.sin(j * .19 + seed) + Math.sin(j * .057 + seed * .3); a = env > -.5 ? (10 + 30 * r) * (.55 + .45 * Math.abs(Math.sin(j * .7 + seed))) : 1.5 + 4 * r; }
-        amp.push(Math.min(48, a));
+      var n = Math.max(6, Math.round(w / 1.6)), seed = Math.round(c.s * 37) + c.n.length * 7, d = '';
+      for (var ch = 0; ch < 2; ch++) {
+        var base = ch ? 100 : 50, p = 'M0 ' + base;
+        for (var j = 0; j < n; j++) {
+          var r = rnd(seed + j * 1.7 + ch * .37), a;
+          if (c.w === 'music') a = 18 + 18 * Math.abs(Math.sin(j * .9 + seed)) * (.6 + .4 * r) + (j % 8 === 0 ? 9 : 0);
+          else { var env = Math.sin(j * .19 + seed) + Math.sin(j * .057 + seed * .3); a = env > -.5 ? (9 + 30 * r) * (.55 + .45 * Math.abs(Math.sin(j * .7 + seed))) : 1 + 3 * r; }
+          p += 'V' + (base - Math.min(46, a)).toFixed(1) + 'H' + (j + 1);
+        }
+        d += p + 'V' + base + 'Z';
       }
-      for (j = 0; j < n; j++) d += 'V' + (50 - amp[j]).toFixed(1) + 'H' + (j + 1);
-      for (j = n - 1; j >= 0; j--) e += 'V' + (50 + amp[j]).toFixed(1) + 'H' + j;
-      return '<svg class="wv" viewBox="0 0 ' + n + ' 100" preserveAspectRatio="none" aria-hidden="true"><path d="' + d + e + 'Z"/></svg><i class="vol"></i>';
+      return '<svg class="wv" viewBox="0 0 ' + n + ' 100" preserveAspectRatio="none" aria-hidden="true"><path d="' + d + '"/></svg><i class="vol"></i>';
     }
     function clipHTML(c, k, h) {
       var x = c.s * k + 1, w = Math.max(4, (c.e - c.s) * k - 1), v = c.tr.charAt(0) === 'V';
