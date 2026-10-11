@@ -91,7 +91,7 @@ code{font-family:var(--mono);font-size:.88em;color:#e4e2de;background:#18181b;bo
 .embers i{position:absolute;bottom:-12px;left:var(--x);width:4px;height:4px;border-radius:50%;background:#ffb36b;box-shadow:0 0 8px 2px rgba(255,77,46,.8);opacity:0;animation:ember var(--d) linear var(--o) infinite}
 @keyframes ember{0%{transform:translate(0,0);opacity:0}12%{opacity:1}100%{transform:translate(46px,-74vh);opacity:0}}
 .hero-in{position:relative;z-index:2;padding-top:calc(var(--nav) + 40px);padding-bottom:clamp(56px,10vh,110px)}
-.hero-copy{max-width:min(860px,64vw)}
+.hero-copy{max-width:min(1010px,68vw)}
 .hero-copy .lede,.hero-copy .how{max-width:620px}
 @media (max-width:760px){.hero-copy{max-width:none}}
 .hero .facts{display:flex;align-items:center;gap:10px;margin-bottom:22px;font-size:14px;color:var(--muted)}
