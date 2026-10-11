@@ -14,7 +14,7 @@
 - [Download the latest release](https://github.com/Apocale/khanjar/releases/latest): `Khanjar-<version>.zip`, a menu bar app.
 - [Installation guide](https://github.com/Apocale/khanjar/blob/main/docs/INSTALL.md): manual steps, plus a prompt that lets Claude Code do the install.
 - [Guide d'installation en français](https://github.com/Apocale/khanjar/blob/main/docs/INSTALL.fr.md)
-- [Website](https://apocale.github.io/khanjar/)
+- [Website](https://apocale.github.io/khanjar/): a working copy of the palette over a Premiere Pro 2026 screen, to try in the browser (demo footage: free Pexels clips).
 
 ## What it does
 

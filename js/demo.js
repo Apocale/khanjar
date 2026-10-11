@@ -133,6 +133,7 @@
         onSelect: function (sel) { if (user) { var v = sel.filter(function (c) { return c.tr.charAt(0) === 'V'; }).length; say(v ? v + ' clip' + (v === 1 ? '' : 's') + ' selected. Press ⌘J.' : 'No clip selected. Click one in the timeline.'); } } } };
     });
     function say(t) { if (status) status.textContent = t; }
+    if (reduce) say(touch ? 'Tap Open the palette to try it.' : 'Press ⌘J to try it.');
     function api() { return S.api; }
     // the footage only loads when the demo comes near
     if ('IntersectionObserver' in window) new IntersectionObserver(function (es) { if (es[0].isIntersecting) api().wake(); }, { rootMargin: '600px 0px' }).observe(box);
