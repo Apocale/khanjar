@@ -99,20 +99,22 @@ function start() {
         if (screenY(tmp, pommel) > (kind === 'hero' ? .16 : .1)) break;
         basePitch += deg(.6);
       }
-      moon = kind === 'final' ? [.14, .2] : [.2, .19]; moonR = .0155;
-      clouds = [[.56, .17, .11, 1], [.86, .3, .09, 2], [.34, .08, .07, 2], [.08, .36, .1, 0]];
+      moon = kind === 'final' ? [.62, .17] : [.54, .15]; moonR = .0155;
+      clouds = [[.66, .1, .1, 1], [.9, .3, .09, 2]];
     } else {
       // a camera near the stone: the dagger above the words
       fov = 50;
       basePos.set(props.top.x - 2.2, 2.5, props.top.z + 12.6);
       baseYaw = Math.atan2(-(props.top.x - basePos.x), -(props.top.z - basePos.z)) + .02;
       basePitch = deg(3);
-      const blockTop = words ? wordsRect[1] / H : .5;
-      for (let i = 0; i < 16; i++) {
+      const blockTop = words ? wordsRect[1] / H : .5, navY = 76 / H;
+      // the stone's foot just above the words; if the pommel then goes under the nav, widen the view
+      for (let i = 0; i < 24; i++) {
         aim(tmp, fov, aspect, basePos, baseYaw, basePitch);
         const over = screenY(tmp, foot) - (blockTop - .03);
-        if (over <= .003) break;
-        basePitch -= Math.atan(over * 2 * Math.tan(deg(fov / 2)));
+        if (over > .003) { basePitch -= Math.atan(over * 2 * Math.tan(deg(fov / 2))); continue; }
+        if (screenY(tmp, pommel) < navY + .02 && fov < 74) { fov += 2; continue; }
+        break;
       }
       moon = [.78, .1]; moonR = .028;
       clouds = [[.2, .16, .32, 2], [.86, .3, .28, 1]];

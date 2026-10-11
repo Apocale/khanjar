@@ -250,3 +250,18 @@
 .pp[data-layout="port"] .kp{top:9%}
 .pp[data-layout="port"] .khud{top:9%}
 .pp[data-layout="port"] .kp-list .d{max-width:44%}
+
+/* Khanjar's Settings window, the "Preset shortcuts" part (settings-dark.png), shown over the shortcuts stage */
+.ksettings{position:absolute;right:4%;top:12%;z-index:30;width:min(330px,74%);padding:16px 18px 14px;border-radius:12px;background:#323232;color:#f0f0f0;text-align:center;
+  font:400 13px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.12),0 24px 60px rgba(0,0,0,.6);opacity:0;transform:translateY(8px) scale(.98);transition:opacity .25s,transform .3s cubic-bezier(.2,.7,.2,1);pointer-events:none}
+.ksettings.show{opacity:1;transform:none}
+.ks-t{font-size:15px;font-weight:700}
+.ks-s{margin-top:4px;font-size:11.5px;color:#9a9a9a}
+.ks-l{margin-top:12px;padding:8px 10px;border:1px solid #4a4a4a;background:#2b2b2b;text-align:left}
+.ks-l p{display:flex;align-items:center;gap:14px;height:24px;font-size:13.5px}
+.ks-l b{flex:0 0 52px;font-weight:600;letter-spacing:.04em}
+.ks-l i{width:12px;height:12px;border-radius:50%;border:1.3px solid #9a9a9a;position:relative}
+.ks-l i::after{content:"";position:absolute;left:2px;right:2px;top:4.5px;height:1.3px;background:#9a9a9a}
+.ks-l p:first-child{background:#0a59c9;margin:0 -10px;padding:0 10px}
+.ks-b{display:inline-block;margin-top:12px;padding:3px 14px;border-radius:6px;background:#5e5e5e;font-size:13px}

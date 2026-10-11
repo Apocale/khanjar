@@ -5,7 +5,7 @@
 import { NOISE, TOD, SKY } from './glsl.js';
 
 export const CAM_Z = 16;                         // the desktop camera stands at (0, 2, 16), looking down -z
-export const ROCK = { x: 3.9, z: -4 };            // the summit where the dagger is planted (right of centre)
+export const ROCK = { x: 4.5, z: -4 };            // the summit where the dagger is planted (right of centre)
 
 // ---- the land (CPU, once) ----
 function makeNoise(seed) {

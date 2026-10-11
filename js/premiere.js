@@ -189,9 +189,9 @@
     var api = { root: root };
     var D = layout === 'wide' ? { w: 1240, h: 700, row1: 290, mon: 330 } : layout === 'stage' ? { w: 860, h: 560, row1: 236, mon: 232 } : { w: 430, h: 800, row1: 430, mon: 0 };
     if (o.size) Object.assign(D, o.size);
-    var TRK = layout === 'wide' ? [['V4', 24], ['V3', 28], ['V2', 40], ['V1', 40], ['A1', 36], ['A2', 24], ['A3', 30], ['Mix', 22]]
+    var TRK = o.tracks || (layout === 'wide' ? [['V4', 24], ['V3', 28], ['V2', 40], ['V1', 40], ['A1', 36], ['A2', 24], ['A3', 30], ['Mix', 22]]
       : layout === 'stage' ? [['V4', 20], ['V3', 25], ['V2', 34], ['V1', 34], ['A1', 30], ['A3', 24]]
-      : [['V4', 22], ['V3', 28], ['V2', 40], ['V1', 40], ['A1', 36], ['A2', 22], ['A3', 30]];
+      : [['V4', 22], ['V3', 28], ['V2', 40], ['V1', 40], ['A1', 36], ['A2', 22], ['A3', 30]]);
 
     // ---------- markup ----------
     function headHTML() {
@@ -474,11 +474,11 @@
       khud.classList.add('show'); clearTimeout(hud.t);
       hud.t = setTimeout(function () { khud.classList.remove('show'); }, ms || (kind === 'warn' ? 4000 : kind === 'ok' ? 1400 : 1800));
     }
-    function apply(item, onlyIds) {
+    function apply(item, onlyIds, silent) {
       var sel = onlyIds ? onlyIds.map(function (id) { return byId[id]; }) : selected();
       var vids = sel.filter(function (c) { return c.tr.charAt(0) === 'V'; });
-      if (!sel.length) { hud('Select a clip in the timeline first', 'warn'); return 0; }
-      if (!vids.length) { hud('Select a video clip (not just audio)', 'warn'); return 0; }
+      if (!sel.length) { if (!silent) hud('Select a clip in the timeline first', 'warn'); return 0; }
+      if (!vids.length) { if (!silent) hud('Select a video clip (not just audio)', 'warn'); return 0; }
       var parts = item.kind === 'duo' ? item.of.map(function (id) { return BY[id]; }) : [item];
       var steps = 0;
       parts.forEach(function (p) {
@@ -487,10 +487,10 @@
       });
       undo.push({ ids: vids.map(function (c) { return c.id; }), n: parts.length, steps: steps, left: steps, preset: parts.some(function (p) { return p.kind === 'preset'; }) });
       paintSel();
-      vids.forEach(function (c) { var el = clipEl(c.id); if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); } });
+      if (!silent || silent === 'flash') vids.forEach(function (c) { var el = clipEl(c.id); if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); } });
       if (!edited) { edited = true; root.classList.add('edited'); }
       render();
-      hud(item.title + ' → ' + vids.length + ' clip' + (vids.length === 1 ? '' : 's'), 'ok');
+      if (!silent) hud(item.title + ' → ' + vids.length + ' clip' + (vids.length === 1 ? '' : 's'), 'ok');
       if (o.onApply) o.onApply(item, vids);
       return vids.length;
     }
