@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khanjar: every Premiere effect, one keystroke</title>
-<meta name="description" content="A Spotlight-style command palette for Adobe Premiere Pro on Mac. Press ⌘J, type a few letters, hit Enter. Free and open source.">
+<meta name="description" content="Free command palette for Adobe Premiere Pro on Mac: press ⌘J, type a few letters of any effect or preset, press Enter, and it is applied to every selected clip. Keyboard shortcuts for presets, most used presets first. Open source.">
+<meta name="keywords" content="Premiere Pro plugin, Premiere Pro command palette, Premiere Pro presets, keyboard shortcut for a preset, apply a preset to multiple clips, adjustment layer shortcut, Premiere Pro extension, UXP plugin, macOS, free, open source">
 <meta name="color-scheme" content="dark">
 <meta property="og:title" content="Khanjar: every Premiere effect, one keystroke">
-<meta property="og:description" content="Press ⌘J in Premiere Pro, type a few letters, hit Enter. Applied to every selected clip, one ⌘Z to undo.">
+<meta property="og:description" content="Press ⌘J in Premiere Pro, type a few letters, hit Enter: applied to every selected clip at once. Free and open source.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://apocale.github.io/khanjar/">
 <meta property="og:image" content="https://apocale.github.io/khanjar/assets/og.jpg">
@@ -432,6 +433,75 @@ footer .ar{font-family:"Aref Ruqaa",serif;color:var(--accent);font-size:17px;mar
   html{scroll-behavior:auto}
 }
 </style>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "SoftwareApplication",
+   "name": "Khanjar",
+   "description": "Free, open-source command palette for Adobe Premiere Pro on macOS. Press ⌘J, type a few letters of any video effect or preset, press Enter: it is applied to every selected clip. Keyboard shortcuts for presets, most used presets first (⌘1 to ⌘0), adjustment layer at the playhead (⌘⇧J).",
+   "applicationCategory": "MultimediaApplication",
+   "operatingSystem": "macOS 13 or later, Apple Silicon",
+   "softwareVersion": "0.8.4",
+   "softwareRequirements": "Adobe Premiere Pro 2026 (26.x) or later; Creative Cloud desktop app",
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+   "url": "https://apocale.github.io/khanjar/",
+   "downloadUrl": "https://github.com/Apocale/khanjar/releases/latest",
+   "codeRepository": "https://github.com/Apocale/khanjar",
+   "image": "https://apocale.github.io/khanjar/assets/og.jpg",
+   "author": {
+    "@type": "Person",
+    "name": "Isma",
+    "url": "https://github.com/Apocale"
+   }
+  },
+  {
+   "@type": "FAQPage",
+   "mainEntity": [
+    {
+     "@type": "Question",
+     "name": "Is there a command palette for Adobe Premiere Pro?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes: Khanjar, free for Mac. Press ⌘J in Premiere, type a few letters of any effect or preset, press Enter."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "How do I apply a preset to many clips at once in Premiere Pro?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "With Khanjar: select the clips, press ⌘J, pick the preset, press Enter. It lands on every selected clip in one step; undo takes one ⌘Z for an effect, two or three for a preset."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Can I assign a keyboard shortcut to a preset in Premiere Pro?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes, with Khanjar: menu bar icon > Settings… > Add a shortcut…, choose the preset, press the key combination."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Does it work with preset packs I bought?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. Khanjar reads your own Premiere effect presets, where installed packs live, including presets saved in a Premiere set to another language."
+     }
+    }
+   ]
+  }
+ ]
+}
+</script>
+<link rel="alternate" type="text/plain" href="llms.txt" title="Khanjar for AI assistants (llms.txt)">
 </head>
 <body>
 <script>if (!/Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)) document.documentElement.classList.add('no-apple');</script>
@@ -717,11 +787,12 @@ Don't touch any of my Premiere projects, never use sudo, and tell me each step i
 
 <footer>
   <div class="wrap">
-    <span><span class="ar" aria-hidden="true">خنجر</span>Khanjar means dagger in Arabic, Persian and Urdu. Not affiliated with or endorsed by Adobe. Adobe, Premiere Pro and Creative Cloud are trademarks of Adobe; Apple and Mac are trademarks of Apple.</span>
+    <span><span class="ar" aria-hidden="true">خنجر</span>Khanjar means dagger in Arabic, Persian and Urdu. Made by an editor, with AI. Not affiliated with or endorsed by Adobe. Adobe, Premiere Pro and Creative Cloud are trademarks of Adobe; Apple and Mac are trademarks of Apple.</span>
     <nav>
       <a href="https://github.com/Apocale/khanjar">GitHub</a>
       <a href="https://github.com/Apocale/khanjar/blob/main/PRIVACY.md">Privacy</a>
       <a href="https://github.com/Apocale/khanjar/blob/main/docs/INSTALL.md">Install guide</a>
+      <a href="llms.txt">llms.txt</a>
     </nav>
   </div>
 </footer>
